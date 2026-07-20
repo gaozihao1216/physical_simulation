@@ -120,6 +120,7 @@ class MuJoCoCompiler:
 
         body_mapping: list[tuple[str, str]] = []
         geom_mapping: list[tuple[str, str]] = []
+        contact_pair_candidates: list[tuple[str, str, int, int, str]] = []
 
         for instance in scene.instances:
             self._compile_instance(
@@ -128,8 +129,10 @@ class MuJoCoCompiler:
                 worldbody=worldbody,
                 body_mapping=body_mapping,
                 geom_mapping=geom_mapping,
+                contact_pair_candidates=contact_pair_candidates,
             )
 
+        self._compile_contact_pairs(root, contact_pair_candidates)
         indent_xml(root)
         mjcf = ET.tostring(root, encoding="unicode", short_empty_elements=True)
         return MuJoCoCompilationResult(
@@ -147,6 +150,7 @@ class MuJoCoCompiler:
         worldbody: ET.Element,
         body_mapping: list[tuple[str, str]],
         geom_mapping: list[tuple[str, str]],
+        contact_pair_candidates: list[tuple[str, str, int, int, str]],
     ) -> None:
         asset = instance.asset
         if len(asset.bodies) != 1:
@@ -195,6 +199,7 @@ class MuJoCoCompiler:
                 body_element=body_element,
                 runtime_body_id=runtime_body_id,
                 geom_mapping=geom_mapping,
+                contact_pair_candidates=contact_pair_candidates,
             )
 
     def _compile_inertial(
@@ -259,6 +264,7 @@ class MuJoCoCompiler:
         body_element: ET.Element,
         runtime_body_id: str,
         geom_mapping: list[tuple[str, str]],
+        contact_pair_candidates: list[tuple[str, str, int, int, str]],
     ) -> None:
         if not collider.enabled:
             return
@@ -272,6 +278,16 @@ class MuJoCoCompiler:
             )
         geom_type, geom_size = geometry_to_mujoco(collider.geometry)
         geom_name = make_mujoco_name("collision", f"{runtime_body_id}/{collider.collider_id}")
+        contype = _collision_group_to_contype(
+            collider.collision_group,
+            scene_id=scene.scene_id,
+            collider_id=collider.collider_id,
+        )
+        conaffinity = _collision_mask_to_conaffinity(
+            collider.collision_mask,
+            scene_id=scene.scene_id,
+            collider_id=collider.collider_id,
+        )
         # MuJoCo friction is an approximation here: sliding uses dynamic_friction;
         # static_friction and restitution are retained in IR but not directly mapped.
         ET.SubElement(
@@ -283,20 +299,8 @@ class MuJoCoCompiler:
                 "size": format_vector(geom_size),
                 "pos": format_vector(collider.local_transform.position),
                 "quat": format_vector(_mujoco_quat(collider.local_transform.rotation)),
-                "contype": str(
-                    _collision_group_to_contype(
-                        collider.collision_group,
-                        scene_id=scene.scene_id,
-                        collider_id=collider.collider_id,
-                    )
-                ),
-                "conaffinity": str(
-                    _collision_mask_to_conaffinity(
-                        collider.collision_mask,
-                        scene_id=scene.scene_id,
-                        collider_id=collider.collider_id,
-                    )
-                ),
+                "contype": str(contype),
+                "conaffinity": str(conaffinity),
                 "friction": format_vector(
                     (
                         material.dynamic_friction,
@@ -307,3 +311,64 @@ class MuJoCoCompiler:
             },
         )
         geom_mapping.append((geom_name, runtime_body_id))
+        contact_pair_candidates.append(
+            (
+                geom_name,
+                runtime_body_id,
+                contype,
+                conaffinity,
+                self._contact_body_kind(body=body, instance=instance),
+            )
+        )
+
+    def _compile_contact_pairs(
+        self,
+        root: ET.Element,
+        contact_pair_candidates: list[tuple[str, str, int, int, str]],
+    ) -> None:
+        pair_elements: list[tuple[str, str]] = []
+        for index, first in enumerate(contact_pair_candidates):
+            first_geom, first_runtime_body, first_contype, first_conaffinity, first_kind = first
+            for second_geom, second_runtime_body, second_contype, second_conaffinity, second_kind in contact_pair_candidates[index + 1:]:
+                if first_runtime_body == second_runtime_body:
+                    continue
+                if not self._explicit_contact_pair_supported(first_kind, second_kind):
+                    continue
+                if not self._collision_pair_enabled(
+                    first_contype,
+                    first_conaffinity,
+                    second_contype,
+                    second_conaffinity,
+                ):
+                    continue
+                pair_elements.append((first_geom, second_geom))
+        if not pair_elements:
+            return
+        contact_element = ET.SubElement(root, "contact")
+        for first_geom, second_geom in pair_elements:
+            ET.SubElement(contact_element, "pair", {"geom1": first_geom, "geom2": second_geom})
+
+    def _collision_pair_enabled(
+        self,
+        first_contype: int,
+        first_conaffinity: int,
+        second_contype: int,
+        second_conaffinity: int,
+    ) -> bool:
+        return bool(
+            (first_contype & second_conaffinity)
+            or (second_contype & first_conaffinity)
+        )
+
+    def _contact_body_kind(self, *, body: RigidBodySpec, instance: AssetInstanceSpec) -> str:
+        if body.body_type == "kinematic":
+            return "kinematic"
+        if body.body_type == "dynamic" and instance.fixed_base:
+            return "fixed_dynamic"
+        return body.body_type
+
+    def _explicit_contact_pair_supported(self, first_kind: str, second_kind: str) -> bool:
+        # MuJoCo can produce solver errors for explicit contacts involving
+        # kinematic-as-fixed placeholders. Leave those to future kinematic
+        # semantics instead of exposing fake contacts in Phase 2D1.
+        return first_kind != "kinematic" and second_kind != "kinematic"

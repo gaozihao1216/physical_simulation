@@ -185,6 +185,64 @@ def test_collider_material_friction_collision_mask_and_disabled_collider() -> No
     assert geom.attrib["friction"] == "0.8 0.005 0.0001"
 
 
+def test_explicit_contact_pairs_use_collision_geoms_and_respect_filters() -> None:
+    first_asset = create_single_body_asset(
+        asset_id="first_asset",
+        body=create_box("first_body", (1.0, 1.0, 1.0), body_type="static"),
+    )
+    blocked_body = create_box("blocked_body", (1.0, 1.0, 1.0), body_type="static")
+    blocked_collider = blocked_body.colliders[0]
+    blocked_body = RigidBodySpec(
+        blocked_body.body_id,
+        blocked_body.name,
+        blocked_body.body_type,
+        blocked_body.transform,
+        blocked_body.visuals,
+        (
+            ColliderSpec(
+                blocked_collider.collider_id,
+                blocked_collider.geometry,
+                blocked_collider.local_transform,
+                blocked_collider.material_id,
+                enabled=blocked_collider.enabled,
+                collision_group=0,
+                collision_mask=0,
+            ),
+        ),
+        blocked_body.mass_properties,
+    )
+    blocked_asset = create_single_body_asset(asset_id="blocked_asset", body=blocked_body)
+    scene = create_scene(
+        scene_id="contact_pairs",
+        instances=(
+            AssetInstanceSpec("first", first_asset),
+            AssetInstanceSpec("blocked", blocked_asset),
+        ),
+    )
+    _result, root = _root(scene)
+
+    assert root.findall(".//contact/pair") == []
+
+    allowed_asset = create_single_body_asset(
+        asset_id="allowed_asset",
+        body=create_box("allowed_body", (1.0, 1.0, 1.0), body_type="static"),
+    )
+    scene = create_scene(
+        scene_id="contact_pairs_allowed",
+        instances=(
+            AssetInstanceSpec("first", first_asset),
+            AssetInstanceSpec("allowed", allowed_asset),
+        ),
+    )
+    _result, root = _root(scene)
+    pairs = root.findall(".//contact/pair")
+    visual_names = {geom.attrib["name"] for geom in root.findall(".//geom") if geom.attrib["contype"] == "0"}
+
+    assert len(pairs) == 1
+    assert pairs[0].attrib["geom1"] not in visual_names
+    assert pairs[0].attrib["geom2"] not in visual_names
+
+
 def test_compound_collider_has_one_inertial_and_multiple_collision_geoms() -> None:
     geometry = BoxGeometry((1.0, 1.0, 1.0))
     body = RigidBodySpec(

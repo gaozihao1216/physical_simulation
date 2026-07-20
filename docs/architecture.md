@@ -46,13 +46,24 @@ PhysicsSceneSpec
 
 `MjModel` 是加载后的 MuJoCo 模型，`MjData` 是 backend 内部可变状态。MuJoCo numeric body ID 和 geom ID 只保存在 `MuJoCoBackend` 内部，用于状态查询和后续接触映射，不进入 Physics IR 或业务层公共接口。
 
+Phase 2D1 的接触路径为：
+
+```text
+MjData contacts
+-> MuJoCoBackend contact adapter
+-> ContactPoint
+-> SimulationStepResult
+```
+
+MuJoCo geom IDs 是 backend-private。`ContactPoint` 只包含 runtime body IDs、世界接触点、从 `body_a` 指向 `body_b` 的单位法向和非负穿透深度。接触力、摩擦力和冲量不在 Phase 2D1 中读取。
+
 ## Runtime Layer
 
 负责 reset、step、状态查询、接触事件、传感器更新和确定性执行。
 
 Phase 2C2 已支持 reset、单步 step、刚体世界位姿读取、世界线速度和角速度读取，并把结果封装为后端无关的 `SimulationStepResult` 快照。
 
-当前 `SimulationStepResult.contacts` 始终为空，即使 MuJoCo 内部已经产生接触。接触提取和映射留到 Phase 2D。
+Phase 2D1 已支持把 MuJoCo active contacts 映射为 `ContactPoint`，并随 `SimulationStepResult.contacts` 返回。接触力和接触冲量留到后续阶段。
 
 ## Robot Task Layer
 

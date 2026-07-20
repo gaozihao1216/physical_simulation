@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已完成 Phase 1、Phase 1.5、Phase 2A、Phase 2B、Phase 2C1 和 Phase 2C2。项目已经可以通过 MuJoCo 加载场景、reset、推进单步仿真，并读取刚体世界状态，但仍未实现接触映射、力控制、关节系统、机器人任务或动态评估。
+当前已完成 Phase 1、Phase 1.5、Phase 2A、Phase 2B、Phase 2C1、Phase 2C2 和 Phase 2D1。项目已经可以通过 MuJoCo 加载场景、reset、推进单步仿真，读取刚体世界状态，并把 MuJoCo active contacts 映射为后端无关的 `ContactPoint`。接触力、力控制、关节系统、机器人任务和动态评估仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -92,7 +92,8 @@ physical_simulation/
 - Phase 2B：PhysicsSceneSpec -> MJCF Compiler。
 - Phase 2C1：MuJoCo Model Loading and ID Mapping。
 - Phase 2C2：Reset, Step and Rigid-Body State。
-- Phase 2D：Contact Mapping and Contact State。
+- Phase 2D1：MuJoCo Contact Mapping。
+- Phase 2D2：Contact Force and Impulse。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -124,6 +125,31 @@ physical_simulation/
 - mesh
 - GUI
 - task evaluation
+
+## Phase 2D1 当前能力
+
+已支持：
+
+- MuJoCo active contact extraction：遍历 `data.contact[0:data.ncon]`。
+- geom ID -> runtime body ID：公开结果只包含 `"{instance_id}/{body_id}"`，不泄漏 MuJoCo numeric ID 或 sanitized name。
+- world-space contact position：`ContactPoint.position` 使用 MuJoCo 世界接触点。
+- deterministic body ordering：`body_a/body_b` 按 runtime body ID 字典序稳定排序。
+- body_a -> body_b contact normal：MuJoCo `contact.frame[:3]` 为 `geom1 -> geom2`，如果排序交换双方则同步翻转 normal。
+- non-negative penetration depth：`penetration_depth = max(0.0, -contact.dist)`。
+- multiple contact points：同一 body pair 的多个接触点全部保留，不合并、不平均。
+- contact snapshots in `SimulationStepResult`：`reset()` 和 `step()` 返回当前 MuJoCo 状态对应的 contacts。
+- fixed-base contact authoring：compiler 会为允许碰撞的 collision geom pair 生成显式 MuJoCo `<contact><pair>`，以便 fixed-base dynamic 与 static body 的接触也能进入 active contact。
+
+尚未支持：
+
+- normal force
+- tangential force
+- contact impulse
+- resting stability evaluation
+- friction validation
+- restitution validation
+- task success metrics
+- robot interaction
 
 ## 当前项目状态
 

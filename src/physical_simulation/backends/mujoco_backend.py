@@ -305,13 +305,14 @@ class MuJoCoBackend(PhysicsBackend):
         )
 
     def get_contacts(self) -> tuple[ContactPoint, ...]:
-        """Return contacts.
-
-        Contact extraction is implemented in Phase 2D. Phase 2C2 always
-        returns an empty tuple even if MuJoCo has internal contacts.
-        """
+        """Return the current MuJoCo active contacts as backend-independent snapshots."""
         self._require_loaded("get_contacts")
-        return ()
+        contacts: list[ContactPoint] = []
+        for index in range(int(self._data.ncon)):
+            converted = self._convert_mujoco_contact(self._data.contact[index])
+            if converted is not None:
+                contacts.append(converted)
+        return tuple(sorted(contacts, key=self._contact_sort_key))
 
     def apply_force(self, body_id: str, force: Any, point: Optional[Any] = None) -> None:
         """Force application is not implemented in Phase 2C2."""
@@ -351,7 +352,7 @@ class MuJoCoBackend(PhysicsBackend):
             step_index=self._step_index,
             body_states=states,
             joint_states=(),
-            contacts=(),
+            contacts=self.get_contacts(),
         )
         return result
 
@@ -399,6 +400,105 @@ class MuJoCoBackend(PhysicsBackend):
                         f"runtime_body_id={state.body_id!r}; step_index={self._step_index}; "
                         f"time={self._current_time()}; field={field_name!r}; value={value!r}"
                     )
+
+    def _convert_mujoco_contact(self, contact: Any) -> Optional[ContactPoint]:
+        geom1 = int(contact.geom1)
+        geom2 = int(contact.geom2)
+        first_body = self._get_runtime_body_for_geom_id(geom1)
+        second_body = self._get_runtime_body_for_geom_id(geom2)
+        if first_body == second_body:
+            return None
+        body_a, body_b, swapped = self._order_contact_bodies(first_body, second_body)
+        position = self._float_tuple(contact.pos, 3)
+        normal = self._extract_contact_normal(contact, swapped=swapped)
+        penetration_depth = max(0.0, float(-contact.dist))
+        self._validate_finite_contact_fields(
+            geom1=geom1,
+            geom2=geom2,
+            fields={
+                "position": position,
+                "normal": normal,
+                "penetration_depth": (penetration_depth,),
+            },
+        )
+        return ContactPoint(
+            body_a=body_a,
+            body_b=body_b,
+            position=position,
+            normal=normal,
+            penetration_depth=penetration_depth,
+            normal_force=None,
+            tangential_force=None,
+        )
+
+    def _get_runtime_body_for_geom_id(self, geom_id: int) -> str:
+        try:
+            return self._mj_geom_id_to_runtime_body[geom_id]
+        except KeyError as exc:
+            raise MuJoCoRuntimeError(
+                f"MuJoCo contact references an unmapped collision geom; "
+                f"scene_id={self._current_scene_id()!r}; geom_id={geom_id!r}; "
+                f"geom_name={self._get_geom_name(geom_id)!r}; step_index={self._step_index}; "
+                f"time={self._current_time()}"
+            ) from exc
+
+    def _get_geom_name(self, geom_id: int) -> Optional[str]:
+        if self._model is None or geom_id < 0 or geom_id >= int(self._model.ngeom):
+            return None
+        try:
+            return str(self._model.geom(geom_id).name)
+        except Exception:
+            return None
+
+    def _order_contact_bodies(self, first_body: str, second_body: str) -> tuple[str, str, bool]:
+        if first_body <= second_body:
+            return first_body, second_body, False
+        return second_body, first_body, True
+
+    def _extract_contact_normal(self, contact: Any, *, swapped: bool) -> tuple[float, float, float]:
+        """Return project contact normal from body_a toward body_b.
+
+        MuJoCo's contact frame stores the contact normal in frame[0:3], pointing
+        from geom1 toward geom2. If stable body ordering swaps the mapped
+        geom/body pair, the normal must be negated to keep the public
+        ContactPoint convention: normal points from body_a to body_b.
+        """
+        normal = self._float_tuple(contact.frame[:3], 3)
+        if swapped:
+            normal = tuple(-value for value in normal)
+        norm = math.sqrt(sum(value * value for value in normal))
+        if norm <= 1.0e-12:
+            raise MuJoCoRuntimeError(
+                f"MuJoCo contact normal has near-zero length; scene_id={self._current_scene_id()!r}; "
+                f"geom1={int(contact.geom1)!r}; geom2={int(contact.geom2)!r}; "
+                f"step_index={self._step_index}; time={self._current_time()}; field='normal'"
+            )
+        return tuple(value / norm for value in normal)
+
+    def _validate_finite_contact_fields(
+        self,
+        *,
+        geom1: int,
+        geom2: int,
+        fields: dict[str, Any],
+    ) -> None:
+        for field_name, values in fields.items():
+            for value in values:
+                if not math.isfinite(float(value)):
+                    raise MuJoCoRuntimeError(
+                        f"non-finite MuJoCo contact state; scene_id={self._current_scene_id()!r}; "
+                        f"step_index={self._step_index}; time={self._current_time()}; "
+                        f"geom1={geom1!r}; geom2={geom2!r}; field={field_name!r}; value={value!r}"
+                    )
+
+    def _contact_sort_key(self, contact: ContactPoint) -> tuple[object, ...]:
+        return (
+            contact.body_a,
+            contact.body_b,
+            *(round(value, 12) for value in contact.position),
+            *(round(value, 12) for value in contact.normal),
+            round(contact.penetration_depth, 12),
+        )
 
     def _current_time(self) -> float:
         if self._data is None:
