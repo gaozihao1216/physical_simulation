@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from typing import Any, Union
 
+from physical_simulation.assets.physics_asset import PhysicsAssetSpec
 from physical_simulation.assets.rigid_body import RigidBodySpec
+from physical_simulation.scene.physics_scene import PhysicsSceneSpec
 from physical_simulation.validation.errors import SerializationError
 
 
@@ -47,3 +49,59 @@ def load_rigid_body(path: Union[str, Path]) -> RigidBodySpec:
     except OSError as exc:
         raise SerializationError(f"could not read rigid body JSON from path={source!s}: {exc}") from exc
     return from_json_rigid_body(text)
+
+
+def from_json_physics_asset(text: str) -> PhysicsAssetSpec:
+    """Deserialize a physics asset from JSON text."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SerializationError(f"invalid physics asset JSON: {exc.msg} at position {exc.pos}") from exc
+    return PhysicsAssetSpec.from_dict(data)
+
+
+def save_physics_asset(asset: PhysicsAssetSpec, path: Union[str, Path]) -> None:
+    """Save a physics asset JSON document to disk."""
+    if not isinstance(asset, PhysicsAssetSpec):
+        raise SerializationError(f"asset must be PhysicsAssetSpec; actual value={asset!r}")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(to_json(asset), encoding="utf-8")
+
+
+def load_physics_asset(path: Union[str, Path]) -> PhysicsAssetSpec:
+    """Load a physics asset JSON document from disk."""
+    source = Path(path)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SerializationError(f"could not read physics asset JSON from path={source!s}: {exc}") from exc
+    return from_json_physics_asset(text)
+
+
+def from_json_physics_scene(text: str) -> PhysicsSceneSpec:
+    """Deserialize a physics scene from JSON text."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SerializationError(f"invalid physics scene JSON: {exc.msg} at position {exc.pos}") from exc
+    return PhysicsSceneSpec.from_dict(data)
+
+
+def save_physics_scene(scene: PhysicsSceneSpec, path: Union[str, Path]) -> None:
+    """Save a physics scene JSON document to disk."""
+    if not isinstance(scene, PhysicsSceneSpec):
+        raise SerializationError(f"scene must be PhysicsSceneSpec; actual value={scene!r}")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(to_json(scene), encoding="utf-8")
+
+
+def load_physics_scene(path: Union[str, Path]) -> PhysicsSceneSpec:
+    """Load a physics scene JSON document from disk."""
+    source = Path(path)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SerializationError(f"could not read physics scene JSON from path={source!s}: {exc}") from exc
+    return from_json_physics_scene(text)

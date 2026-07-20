@@ -59,6 +59,14 @@ class RigidBodySpec:
                 f"actual value={self.body_type!r}"
             )
         validate_transform(self.transform)
+        from physical_simulation.assets.scale_baking import is_unit_scale
+
+        if not is_unit_scale(self.transform.scale):
+            raise InvalidRigidBodyError(
+                "transform.scale must be unit scale for RigidBodySpec; "
+                f"actual value={self.transform.scale!r}; "
+                "call bake_transform_scale() before creating physical rigid bodies"
+            )
         visuals = tuple(self.visuals)
         colliders = tuple(self.colliders)
         for visual in visuals:

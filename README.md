@@ -140,6 +140,7 @@ physical_simulation/
 ## 初步开发路线
 
 - Phase 1：Physics IR / Parametric Physics Asset Representation
+- Phase 1.5：Physics IR Semantic Hardening and Scene Representation
 - Phase 2：Collider Generation
 - Phase 3：MuJoCo Backend
 - Phase 4：Rigid Body Simulation
@@ -172,6 +173,51 @@ physical_simulation/
 - Robot
 - 真实碰撞检测
 - 仿真循环
+
+## Phase 1.5: Physics IR Semantic Hardening and Scene Representation
+
+当前已经支持：
+
+- physical scale baking：`GeometrySpec` 表达最终物理尺寸，物理计算不隐式读取 `Transform.scale`。
+- `PhysicsAssetSpec`：可复用物理资产定义。
+- `AssetInstanceSpec`：场景中的资产实例。
+- `PhysicsSceneSpec`：不可变、后端无关的场景输入。
+- runtime body ID：采用 `"{instance_id}/{body_id}"`，避免同一 asset 多次实例化时 body ID 冲突。
+- `RigidBodyState`、`JointState`、`ContactPoint`、`SimulationStepResult`：与 Spec 完全分离的运行状态数据。
+- asset 和 scene JSON round-trip。
+
+当前仍然不支持：
+
+- MuJoCo
+- 仿真循环
+- 后端编译器
+- `MeshGeometry`
+- GLB
+- `JointSpec`
+- Actuator
+- Robot
+- 自动 collider generation
+
+## Scale 语义
+
+Physics IR 中不存在隐式物理缩放：
+
+- `GeometrySpec` 中的尺寸就是最终物理尺寸。
+- 质量、体积和惯量只依赖 `GeometrySpec` 与质量/密度。
+- `RigidBodySpec.transform.scale` 必须是 `(1.0, 1.0, 1.0)`。
+- `ColliderSpec.local_transform.scale` 必须是 `(1.0, 1.0, 1.0)`。
+- `AssetInstanceSpec.transform.scale` 必须是 `(1.0, 1.0, 1.0)`。
+- `VisualSpec.local_transform.scale` 暂时允许非单位 scale，但视觉缩放不影响物理质量、惯量和碰撞体。
+- 如果导入或生成阶段存在物理缩放，应先调用 `bake_transform_scale()` 把 scale 烘焙进几何参数。
+
+CapsuleGeometry 的 scale baking 采用严格均匀缩放策略：只有 `scale_x == scale_y == scale_z` 时才允许烘焙。这样可以避免把椭球帽静默近似成标准胶囊，保持 Phase 1.5 不静默失真。
+
+## ID 边界
+
+- `PhysicsAssetSpec.asset_id`：可复用资产定义 ID。
+- `RigidBodySpec.body_id`：资产内部刚体 ID。
+- `AssetInstanceSpec.instance_id`：场景中的资产实例 ID。
+- `RigidBodyState.body_id`：运行时 body ID，推荐由 `make_runtime_body_id(instance_id, body_id)` 生成，格式为 `"{instance_id}/{body_id}"`。
 
 ## 当前项目状态
 

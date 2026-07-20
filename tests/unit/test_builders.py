@@ -24,21 +24,14 @@ def test_create_sphere_density_computes_mass() -> None:
     assert sphere.mass_properties.mass == pytest.approx(8.0 / 3.0 * math.pi)
 
 
-def test_transform_scale_does_not_affect_mass_or_inertia() -> None:
-    unscaled = create_box("box_a", (1.0, 2.0, 3.0), mass=12.0)
-    scaled = create_box(
-        "box_b",
-        (1.0, 2.0, 3.0),
-        mass=12.0,
-        transform=Transform(scale=(10.0, 10.0, 10.0)),
-    )
-
-    assert unscaled.mass_properties is not None
-    assert scaled.mass_properties is not None
-    assert scaled.mass_properties.mass == pytest.approx(unscaled.mass_properties.mass)
-    assert scaled.mass_properties.inertia_diagonal == pytest.approx(
-        unscaled.mass_properties.inertia_diagonal
-    )
+def test_transform_scale_must_be_baked_before_rigid_body_creation() -> None:
+    with pytest.raises(InvalidRigidBodyError, match="bake_transform_scale"):
+        create_box(
+            "box_b",
+            (1.0, 2.0, 3.0),
+            mass=12.0,
+            transform=Transform(scale=(10.0, 10.0, 10.0)),
+        )
 
 
 def test_mass_and_density_are_mutually_exclusive() -> None:

@@ -17,5 +17,21 @@ class InvalidRigidBodyError(PhysicsValidationError):
     """Raised when rigid body data is invalid."""
 
 
+class InvalidPhysicsAssetError(PhysicsValidationError):
+    """Raised when a reusable physics asset specification is invalid."""
+
+
+class InvalidPhysicsSceneError(PhysicsValidationError):
+    """Raised when a physics scene specification is invalid."""
+
+
+class InvalidRuntimeStateError(PhysicsValidationError):
+    """Raised when runtime state data is invalid."""
+
+
+class ScaleBakingError(PhysicsValidationError):
+    """Raised when transform scale cannot be baked into geometry exactly."""
+
+
 class SerializationError(PhysicsValidationError):
     """Raised when JSON serialization or deserialization fails."""

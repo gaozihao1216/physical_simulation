@@ -48,6 +48,14 @@ class ColliderSpec:
         )
         validate_geometry(self.geometry)
         validate_transform(self.local_transform)
+        from physical_simulation.assets.scale_baking import is_unit_scale
+
+        if not is_unit_scale(self.local_transform.scale):
+            raise PhysicsValidationError(
+                "local_transform.scale must be unit scale for ColliderSpec; "
+                f"actual value={self.local_transform.scale!r}; "
+                "call bake_transform_scale() before creating physical colliders"
+            )
         if not isinstance(self.collision_group, int) or isinstance(self.collision_group, bool):
             raise PhysicsValidationError(
                 f"collision_group must be int; actual value={self.collision_group!r}"

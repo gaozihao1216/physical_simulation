@@ -159,6 +159,109 @@ def validate_rigid_body(body: Any) -> None:
         )
 
 
+def validate_physics_asset(asset: Any) -> None:
+    """Validate a PhysicsAssetSpec instance."""
+    from physical_simulation.assets.physics_asset import (
+        CURRENT_PHYSICS_ASSET_SCHEMA_VERSION,
+        PhysicsAssetSpec,
+    )
+    from physical_simulation.validation.errors import InvalidPhysicsAssetError
+
+    if not isinstance(asset, PhysicsAssetSpec):
+        raise InvalidPhysicsAssetError(
+            f"asset must be PhysicsAssetSpec; actual type={type(asset).__name__}, value={asset!r}"
+        )
+    if asset.schema_version != CURRENT_PHYSICS_ASSET_SCHEMA_VERSION:
+        raise InvalidPhysicsAssetError(
+            "schema_version must be '1.0' for PhysicsAssetSpec; "
+            f"actual value={asset.schema_version!r}"
+        )
+    if not asset.bodies:
+        raise InvalidPhysicsAssetError(
+            f"bodies must contain at least one RigidBodySpec; actual value={asset.bodies!r}"
+        )
+    body_ids = [body.body_id for body in asset.bodies]
+    if len(body_ids) != len(set(body_ids)):
+        raise InvalidPhysicsAssetError(
+            f"body_id values must be unique within asset_id={asset.asset_id!r}; actual IDs={body_ids!r}"
+        )
+    material_ids = [material.material_id for material in asset.materials]
+    if len(material_ids) != len(set(material_ids)):
+        raise InvalidPhysicsAssetError(
+            f"material_id values must be unique within asset_id={asset.asset_id!r}; actual IDs={material_ids!r}"
+        )
+    material_id_set = set(material_ids)
+    for body in asset.bodies:
+        validate_rigid_body(body)
+        for collider in body.colliders:
+            if collider.material_id not in material_id_set:
+                raise InvalidPhysicsAssetError(
+                    "collider.material_id must refer to a material in PhysicsAssetSpec.materials; "
+                    f"asset_id={asset.asset_id!r}, body_id={body.body_id!r}, "
+                    f"collider_id={collider.collider_id!r}, actual material_id={collider.material_id!r}, "
+                    f"available material_ids={material_ids!r}"
+                )
+    for key, value in asset.metadata.items():
+        if not isinstance(key, str) or not key.strip():
+            raise InvalidPhysicsAssetError(
+                f"metadata keys must be non-empty strings; actual key={key!r}"
+            )
+        if not isinstance(value, str):
+            raise InvalidPhysicsAssetError(
+                f"metadata values must be strings; actual key={key!r}, value={value!r}"
+            )
+
+
+def validate_asset_instance(instance: Any) -> None:
+    """Validate an AssetInstanceSpec instance."""
+    from physical_simulation.scene.asset_instance import AssetInstanceSpec
+    from physical_simulation.validation.errors import InvalidPhysicsSceneError
+
+    if not isinstance(instance, AssetInstanceSpec):
+        raise InvalidPhysicsSceneError(
+            f"instance must be AssetInstanceSpec; actual type={type(instance).__name__}, value={instance!r}"
+        )
+
+
+def validate_physics_scene(scene: Any) -> None:
+    """Validate a PhysicsSceneSpec instance."""
+    from physical_simulation.scene.physics_scene import (
+        CURRENT_PHYSICS_SCENE_SCHEMA_VERSION,
+        PhysicsSceneSpec,
+    )
+    from physical_simulation.validation.errors import InvalidPhysicsSceneError
+
+    if not isinstance(scene, PhysicsSceneSpec):
+        raise InvalidPhysicsSceneError(
+            f"scene must be PhysicsSceneSpec; actual type={type(scene).__name__}, value={scene!r}"
+        )
+    if scene.schema_version != CURRENT_PHYSICS_SCENE_SCHEMA_VERSION:
+        raise InvalidPhysicsSceneError(
+            "schema_version must be '1.0' for PhysicsSceneSpec; "
+            f"actual value={scene.schema_version!r}"
+        )
+    if not scene.instances:
+        raise InvalidPhysicsSceneError(
+            f"instances must contain at least one AssetInstanceSpec; actual value={scene.instances!r}"
+        )
+    instance_ids = [instance.instance_id for instance in scene.instances]
+    if len(instance_ids) != len(set(instance_ids)):
+        raise InvalidPhysicsSceneError(
+            f"instance_id values must be unique within scene_id={scene.scene_id!r}; actual IDs={instance_ids!r}"
+        )
+    for instance in scene.instances:
+        validate_asset_instance(instance)
+    for key, value in scene.metadata.items():
+        if not isinstance(key, str) or not key.strip():
+            raise InvalidPhysicsSceneError(
+                f"metadata keys must be non-empty strings; actual key={key!r}"
+            )
+        if not isinstance(value, str):
+            raise InvalidPhysicsSceneError(
+                f"metadata values must be strings; actual key={key!r}, value={value!r}"
+            )
+
+
 __all__ = [
     "_as_float_tuple",
     "_finite_float",
@@ -170,4 +273,7 @@ __all__ = [
     "validate_visual",
     "validate_collider",
     "validate_rigid_body",
+    "validate_physics_asset",
+    "validate_asset_instance",
+    "validate_physics_scene",
 ]
