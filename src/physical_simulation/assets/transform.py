@@ -64,6 +64,44 @@ class Transform:
             "scale": list(self.scale),
         }
 
+    def compose(self, child: "Transform") -> "Transform":
+        """Compose this transform with a child transform.
+
+        Only unit-scale transforms are supported. Bake scale into geometry before
+        composing physical transforms.
+        """
+        if not isinstance(child, Transform):
+            raise PhysicsValidationError(f"child must be Transform; actual value={child!r}")
+        from physical_simulation.assets.scale_baking import is_unit_scale
+        from physical_simulation.math import compose_pose
+
+        if not is_unit_scale(self.scale):
+            raise PhysicsValidationError(
+                "parent Transform.scale must be unit scale for compose(); "
+                f"actual value={self.scale!r}; call bake_transform_scale() before composition"
+            )
+        if not is_unit_scale(child.scale):
+            raise PhysicsValidationError(
+                "child Transform.scale must be unit scale for compose(); "
+                f"actual value={child.scale!r}; call bake_transform_scale() before composition"
+            )
+        position, rotation = compose_pose(
+            self.position,
+            self.rotation,
+            child.position,
+            child.rotation,
+        )
+        return Transform(position=position, rotation=rotation, scale=(1.0, 1.0, 1.0))
+
+    def rotate_vector(
+        self,
+        vector: tuple[float, float, float],
+    ) -> tuple[float, float, float]:
+        """Rotate a vector by this transform's rotation."""
+        from physical_simulation.math import rotate_vector
+
+        return rotate_vector(self.rotation, vector)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Transform":
         """Deserialize a transform from a dictionary."""
