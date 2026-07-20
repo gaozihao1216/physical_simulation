@@ -86,6 +86,7 @@ physical_simulation/
 - Phase 2D1.5：Explicit Contact Pair Semantics Audit。
 - Phase 2D2：Drop and Resting Contact Validation。
 - Phase 2D3A：MuJoCo Contact Wrench Extraction。
+- Phase 2D3A.5：Multi-Directional Contact and Off-Center Impact Validation。
 - Phase 2D3B：Contact Force Aggregation and Impulse（计划中）。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
@@ -139,6 +140,24 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 - joints、robots、meshes、GUI 和完整 task framework。
 
 `ContactPoint` 仍只描述接触几何，`normal_force` 与 `tangential_force` 在当前阶段保持为 `None`。`ContactWrench` 描述求解器在该接触点产生的作用力，不修改 `SimulationStepResult` 字段。
+
+## Phase 2D3A.5 当前能力
+
+已验证：
+
+- 一个动态刚体可以同时接触两个不同的 runtime body。
+- V 形槽中，左右两个非平行接触力共同支撑 sphere。
+- 左右接触力都具有水平分量和竖直分量，水平合力接近零，竖直合力接近 `mg`。
+- V 形槽稳定状态下，基于测试局部聚合计算出的 sphere COM torque 接近零。
+- 倾斜长方体偏心落地时，首次有效接触点相对 COM 有明显水平偏移。
+- 当前 `condim=3` 下 pure contact torque 接近零，但 `r x F` 产生非零 COM torque。
+- 偏心碰撞后 angular velocity 明显非零。
+- `+20 deg` 与 `-20 deg` 镜像场景产生相反符号的 `torque_y` 和 `angular_velocity_y`。
+- 多方向接触和偏心碰撞验证在 reset 后保持确定性。
+
+此前 box-ground 支撑测试虽然有多个 contact point，但宏观运动和接触力方向高度对称，接近一维支撑。Phase 2D3A.5 专门验证多方向接触、多个外部刚体共同作用，以及偏心接触导致的旋转响应。
+
+当前仍未新增公共聚合 API。关于刚体 COM 的 net force / net torque 只在测试和示例中局部计算，正式 `BodyContactWrench`、`BodyPairContactWrench`、impulse、initial velocity、`set_body_velocity` 和 `apply_force` 仍留到后续阶段。
 
 ## Phase 2D2 当前能力
 

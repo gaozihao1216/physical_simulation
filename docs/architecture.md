@@ -95,6 +95,18 @@ MjData.contact
 
 MuJoCo backend 内部用私有 mapped contact 同时保存 raw contact index、geom IDs、runtime body IDs 和公开 `ContactPoint`，`get_contacts()` 与 `get_contact_wrenches()` 复用同一提取路径。这样可以保证两者顺序一致，并避免从排序后的 `ContactPoint` 反向猜测原始 `data.contact`。
 
+Phase 2D3A.5 增加了更有区分度的验证场景，但不新增生产聚合 API：
+
+```text
+ContactWrench sequence
+-> test-local per-body aggregation
+-> net force
+-> torque about COM
+-> translational / rotational response validation
+```
+
+当前关于 COM 的合力和合力矩只在测试与示例中局部计算。正式的 per-body / body-pair 聚合、冲量积分和公开分析 API 将在 Phase 2D3B 设计。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：
