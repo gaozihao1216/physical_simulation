@@ -26,6 +26,9 @@ AssetInstanceSpec
 PhysicsSceneSpec
     immutable simulation input
 
+MuJoCoCompiler
+    converts PhysicsSceneSpec to MuJoCoCompilationResult and MJCF
+
 SimulationStepResult
     runtime output, not part of asset definition
 ```
@@ -59,6 +62,17 @@ GeometrySpec -> RigidBodySpec -> PhysicsAssetSpec -> PhysicsSceneSpec
 ```
 
 `GeometrySpec` stores final local physical dimensions. `RigidBodySpec` describes one rigid body inside an asset. `PhysicsAssetSpec` groups reusable materials and bodies. `PhysicsSceneSpec` places asset instances into a simulation input scene.
+
+Phase 2B adds an offline compiler path:
+
+```text
+PhysicsSceneSpec
+-> MuJoCoCompiler
+-> MuJoCoCompilationResult
+-> MJCF
+```
+
+Physics IR uses final full dimensions. `MuJoCoCompiler` is responsible for converting those dimensions to backend-specific MJCF sizes, such as box half extents and cylinder/capsule half lengths. The compiler records stable string mappings, but it never creates MuJoCo numeric IDs.
 
 ## Backend Layer
 

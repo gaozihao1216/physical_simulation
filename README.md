@@ -142,6 +142,7 @@ physical_simulation/
 - Phase 1：Physics IR / Parametric Physics Asset Representation
 - Phase 1.5：Physics IR Semantic Hardening and Scene Representation
 - Phase 2：Collider Generation
+- Phase 2B：PhysicsSceneSpec to MJCF Compiler
 - Phase 3：MuJoCo Backend
 - Phase 4：Rigid Body Simulation
 - Phase 5：Articulation
@@ -218,6 +219,45 @@ CapsuleGeometry 的 scale baking 采用严格均匀缩放策略：只有 `scale_
 - `RigidBodySpec.body_id`：资产内部刚体 ID。
 - `AssetInstanceSpec.instance_id`：场景中的资产实例 ID。
 - `RigidBodyState.body_id`：运行时 body ID，推荐由 `make_runtime_body_id(instance_id, body_id)` 生成，格式为 `"{instance_id}/{body_id}"`。
+
+## Phase 2B: PhysicsSceneSpec to MJCF Compiler
+
+当前已经支持：
+
+- primitive geometry -> MJCF：box、sphere、cylinder、capsule。
+- instance/body transform composition：使用 `Transform.compose()`，父旋转会作用于 body local position。
+- visual/collider 分离：visual geom 设置 `contype=0`、`conaffinity=0`，不进入 collision geom 映射。
+- static、dynamic、fixed-base dynamic。
+- kinematic-as-fixed：当前按固定 body 编译，不添加 `freejoint`。
+- explicit inertial：dynamic body 使用 `MassProperties` 生成单个 `<inertial>`。
+- material friction 近似：MuJoCo sliding friction 使用 `dynamic_friction`，torsional/rolling 使用固定小默认值。
+- collision filtering：`collision_group -> contype`，`collision_mask -> conaffinity`，`-1` 转为 MuJoCo 全位掩码。
+- stable runtime ID mapping：`"{instance_id}/{body_id}" -> MuJoCo body name`。
+- deterministic MJCF generation：同一 scene 重复编译输出一致。
+
+当前仍然不支持：
+
+- MuJoCo runtime
+- model loading
+- reset / step
+- contact
+- mesh
+- joint
+- actuator
+- robot
+- restitution 映射
+- static friction 独立映射
+
+Primitive 尺寸映射：
+
+```text
+Box(size=(x, y, z)) -> type="box", size=(x/2, y/2, z/2)
+Sphere(radius=r) -> type="sphere", size=(r)
+Cylinder(radius=r, height=h) -> type="cylinder", size=(r, h/2)
+Capsule(radius=r, length=L) -> type="capsule", size=(r, L/2)
+```
+
+限制：每个 `PhysicsAssetSpec` 当前只能包含一个 `RigidBodySpec`；单个 body 可以包含多个 visual 和多个 collider。多 body / articulated asset 需要后续 `JointSpec` 支持。
 
 ## 当前项目状态
 
