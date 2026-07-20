@@ -1,69 +1,38 @@
 # Architecture
 
-This document sketches the intended layering for `physical_simulation`. Phase 1 implements a backend-independent, serializable Physics IR for parametric assets. Runtime simulation and backend integrations are intentionally out of scope for this phase.
-
-## Core Boundaries
-
-```text
-Visual Geometry != Collision Geometry
-Geometry Description != Runtime Simulation
-Physics IR must remain independent of a specific backend
-GeometrySpec
-    local final physical dimensions
-
-Transform.scale
-    import/visual convenience only
-
-Physics scale
-    must be baked before entering RigidBodySpec or PhysicsSceneSpec
-
-PhysicsAssetSpec
-    reusable definition
-
-AssetInstanceSpec
-    scene placement of an asset
-
-PhysicsSceneSpec
-    immutable simulation input
-
-MuJoCoCompiler
-    converts PhysicsSceneSpec to MuJoCoCompilationResult and MJCF
-
-SimulationStepResult
-    runtime output, not part of asset definition
-```
-
-The project uses meters, kilograms, seconds, radians, newtons, and `N*m`. Coordinates are right-handed with `+Z` up. Internal rotations use quaternions in `(w, x, y, z)` order.
-
-Visual transform may contain scale. RigidBody, Collider, and Scene instance transforms may not contain non-unit scale.
+本文档简要说明 `physical_simulation` 的分层设计。核心原则是：业务代码依赖统一 Physics IR，具体物理后端只通过 compiler/backend 层接入。
 
 ## Geometry Layer
 
-Consumes reconstructed visual assets such as GLB files and prepares geometry references for physical authoring.
+负责承接上游重建几何，例如 GLB、mesh 或参数化 primitive。
 
-In Phase 1 this layer is represented only by analytic parametric geometry: box, sphere, cylinder, and capsule. GLB import and mesh geometry are not implemented.
+当前阶段只实现 box、sphere、cylinder、capsule 等参数化几何。`GeometrySpec` 中的尺寸是最终物理尺寸，不通过 `Transform.scale` 隐式改变质量、体积或惯量。
 
 ## Physics Authoring Layer
 
-Defines physical semantics for assets, including rigid bodies, collision shapes, materials, mass properties, joints, and actuators.
+负责人工或自动补充物理语义，包括 visual、collider、material、mass properties、rigid body、joint 和 actuator。
 
-In Phase 1 this includes transform, material, mass properties, visual specs, collider specs, rigid body specs, and parametric builders. Joints and actuators remain future work.
+当前支持 visual/collider 分离、基础材料、质量属性和单刚体资产。关节、执行器和 mesh collider 仍未实现。
 
 ## Physics IR Layer
 
-Provides a backend-independent intermediate representation for scenes, bodies, colliders, dynamics, articulations, robot tasks, and evaluation settings.
-
-The IR is stored as dataclasses with explicit validation and JSON round-trip support. Business code should depend on this IR rather than MuJoCo, Isaac Sim, or any other backend-specific schema.
-
-Phase 1.5 separates four levels:
+提供后端无关的中间表示：
 
 ```text
-GeometrySpec -> RigidBodySpec -> PhysicsAssetSpec -> PhysicsSceneSpec
+GeometrySpec
+-> RigidBodySpec
+-> PhysicsAssetSpec
+-> AssetInstanceSpec
+-> PhysicsSceneSpec
 ```
 
-`GeometrySpec` stores final local physical dimensions. `RigidBodySpec` describes one rigid body inside an asset. `PhysicsAssetSpec` groups reusable materials and bodies. `PhysicsSceneSpec` places asset instances into a simulation input scene.
+`PhysicsSceneSpec` 是后端编译与运行时加载的输入。IR 中使用稳定的业务 ID 与 runtime body ID，不保存 MuJoCo numeric ID。
 
-Phase 2B adds an offline compiler path:
+## Backend Layer
+
+负责把 Physics IR 接入具体物理引擎。
+
+Phase 2B 编译路径：
 
 ```text
 PhysicsSceneSpec
@@ -72,30 +41,31 @@ PhysicsSceneSpec
 -> MJCF
 ```
 
-Physics IR uses final full dimensions. `MuJoCoCompiler` is responsible for converting those dimensions to backend-specific MJCF sizes, such as box half extents and cylinder/capsule half lengths. The compiler records stable string mappings, but it never creates MuJoCo numeric IDs.
+Phase 2C1 加载路径：
 
-## Backend Layer
+```text
+MJCF
+-> mujoco.MjModel
+-> mujoco.MjData
+-> backend-private numeric ID mappings
+```
 
-Adapts the Physics IR to concrete physics engines such as MuJoCo or Isaac Sim through a common backend interface.
-
-Phase 1 keeps only the abstract backend interface. No backend adapter is implemented yet.
+MuJoCo numeric body ID 和 geom ID 只保存在 `MuJoCoBackend` 内部，用于后续状态查询、接触映射和力施加。它们不进入 Physics IR，也不作为业务层公共标识。
 
 ## Runtime Layer
 
-Owns simulation stepping, reset behavior, state queries, contact events, sensor updates, and deterministic execution settings.
+负责 reset、step、状态查询、接触事件、传感器更新和确定性执行。
 
-This layer is not implemented in Phase 1.
-
-Phase 1.5 adds runtime state value objects only: `RigidBodyState`, `JointState`, `ContactPoint`, and `SimulationStepResult`. These are runtime outputs, not asset definitions, and they do not implement stepping.
+当前只定义运行时状态值对象。Phase 2C1 不实现 reset、step、body state、contact 或 force。
 
 ## Robot Task Layer
 
-Defines robot-centered test procedures such as dropping, pushing, stability checks, joint motion tests, and grasping tasks.
+负责机器人相关任务，例如下落、推动、稳定性、关节运动、抓取和夹爪控制。
 
-This layer is not implemented in Phase 1.
+当前仍未实现，后续会基于 Runtime Layer 提供的状态和控制接口构建。
 
 ## Evaluation Layer
 
-Computes metrics, classifies failures, and produces evaluation reports from simulation traces and task outcomes.
+负责从仿真轨迹和任务结果中计算指标、分类失败原因并生成评估报告。
 
-This layer is not implemented in Phase 1.
+当前仍未实现，后续会依赖可复现的仿真运行结果。
