@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取，以及 MuJoCo active contact 到 `ContactPoint` 的映射。接触力、冲量、关节、机器人和评估系统仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射，以及基础 drop/resting-contact 轨迹评估。接触力、冲量、关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -84,7 +84,8 @@ physical_simulation/
 - Phase 2C2：Reset, Step and Rigid-Body State。
 - Phase 2D1：MuJoCo Contact Mapping。
 - Phase 2D1.5：Explicit Contact Pair Semantics Audit。
-- Phase 2D2：Contact Force and Impulse。
+- Phase 2D2：Drop and Resting Contact Validation。
+- Phase 2D3：Contact Force and Impulse。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -120,9 +121,38 @@ physical_simulation/
 
 `static_friction` 和 `restitution` 当前暂未映射到 MJCF explicit pair。`solref` 和 `solimp` 没有对应 Physics IR 参数，因此不显式设置，使用 MuJoCo 默认值。
 
+## Phase 2D2 当前能力
+
+已验证：
+
+- box drop：动态 box 能自由下落、产生 contact，并稳定停留在 ground 顶面。
+- sphere drop：动态 sphere 能稳定落地，最终高度接近半径。
+- resting contact：接近静止支撑位姿的 box 不会持续下沉或抖动。
+- compound surface：由多个 collider 组成的静态桌面可以作为稳定支撑面。
+- trajectory sampling：`simulate_body_trajectory()` 会 reset backend，并记录 `steps + 1` 个 `BodyStateSample`。
+- maximum penetration：从目标 body 相关 contacts 中统计最大穿透深度。
+- last-window stability：settled 判断使用最后一段时间窗口，而不是最后单步速度。
+- deterministic replay：相同 scene 在 reset 后重复运行得到一致的末端状态、contact 序列和 metrics。
+
+`settled` 阈值是评估配置，不是通用物理定律。默认 `SettlingCriteria` 关注最后窗口内的线速度、角速度、位置漂移、姿态漂移，并可要求最终仍存在目标 body contact。
+
+当前仍未支持：
+
+- contact force
+- contact impulse
+- restitution mapping
+- quantitative friction validation
+- `apply_force`
+- joint
+- actuator
+- robot
+- mesh
+- GUI
+- task framework
+
 ## 当前项目状态
 
-项目仍处于早期仿真基础设施阶段，尚未实现完整仿真功能。当前代码已经具备可验证的 Physics IR、场景表示、MJCF 编译、MuJoCo 运行基础和接触映射能力。
+项目仍处于早期仿真基础设施阶段，尚未实现完整仿真功能。当前代码已经具备可验证的 Physics IR、场景表示、MJCF 编译、MuJoCo 运行基础、接触映射和基础轨迹评估能力。
 
 ## 开发原则
 

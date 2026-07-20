@@ -83,14 +83,25 @@ MjData contacts
 
 `ContactPoint` 只包含 runtime body IDs、世界接触点、从 `body_a` 指向 `body_b` 的单位法向和非负穿透深度。接触力、摩擦力和冲量不在当前阶段读取。
 
+## Evaluation Layer
+
+Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：
+
+```text
+MuJoCoBackend
+-> SimulationStepResult sequence
+-> trajectory sampling
+-> RestingContactMetrics
+```
+
+Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。
+
+`simulate_body_trajectory()` 会对已加载的 backend 调用 `reset()`，记录 reset 后样本，然后推进固定步数并记录目标 body 的 `RigidBodyState` 与当前 contacts。`evaluate_resting_contact()` 使用最后窗口内的速度、位置漂移和四元数角距离判断 `settled`。
+
 ## Robot Task Layer
 
 负责机器人相关任务，例如下落、推动、稳定性、关节运动、抓取和夹爪控制。
 
 当前仍未实现，后续会基于 Runtime Layer 提供的状态和控制接口构建。
 
-## Evaluation Layer
-
-负责从仿真轨迹和任务结果中计算指标、分类失败原因并生成评估报告。
-
-当前仍未实现，后续会依赖可复现的仿真运行结果。
+后续完整任务评估、失败分类、接触力/冲量分析和机器人交互评估仍未实现。
