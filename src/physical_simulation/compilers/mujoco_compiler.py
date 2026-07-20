@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
+from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
 from physical_simulation.assets import (
@@ -33,6 +35,19 @@ from physical_simulation.validation.errors import PhysicsValidationError
 MUJOCO_ALL_COLLISION_BITS = (1 << 31) - 1
 MUJOCO_TORSIONAL_FRICTION = 0.005
 MUJOCO_ROLLING_FRICTION = 0.0001
+MUJOCO_EXPLICIT_PAIR_CONDIM = 3
+MUJOCO_EXPLICIT_PAIR_MARGIN = 0.0
+MUJOCO_EXPLICIT_PAIR_GAP = 0.0
+
+
+@dataclass(frozen=True)
+class _ContactPairCandidate:
+    geom_name: str
+    runtime_body_id: str
+    contype: int
+    conaffinity: int
+    has_dof: bool
+    material: PhysicsMaterialSpec
 
 
 def make_mujoco_name(prefix: str, raw_id: str) -> str:
@@ -120,7 +135,7 @@ class MuJoCoCompiler:
 
         body_mapping: list[tuple[str, str]] = []
         geom_mapping: list[tuple[str, str]] = []
-        contact_pair_candidates: list[tuple[str, str, int, int, str]] = []
+        contact_pair_candidates: list[_ContactPairCandidate] = []
 
         for instance in scene.instances:
             self._compile_instance(
@@ -150,7 +165,7 @@ class MuJoCoCompiler:
         worldbody: ET.Element,
         body_mapping: list[tuple[str, str]],
         geom_mapping: list[tuple[str, str]],
-        contact_pair_candidates: list[tuple[str, str, int, int, str]],
+        contact_pair_candidates: list[_ContactPairCandidate],
     ) -> None:
         asset = instance.asset
         if len(asset.bodies) != 1:
@@ -264,7 +279,7 @@ class MuJoCoCompiler:
         body_element: ET.Element,
         runtime_body_id: str,
         geom_mapping: list[tuple[str, str]],
-        contact_pair_candidates: list[tuple[str, str, int, int, str]],
+        contact_pair_candidates: list[_ContactPairCandidate],
     ) -> None:
         if not collider.enabled:
             return
@@ -312,41 +327,42 @@ class MuJoCoCompiler:
         )
         geom_mapping.append((geom_name, runtime_body_id))
         contact_pair_candidates.append(
-            (
-                geom_name,
-                runtime_body_id,
-                contype,
-                conaffinity,
-                self._contact_body_kind(body=body, instance=instance),
+            _ContactPairCandidate(
+                geom_name=geom_name,
+                runtime_body_id=runtime_body_id,
+                contype=contype,
+                conaffinity=conaffinity,
+                has_dof=self._body_has_dof(body=body, instance=instance),
+                material=material,
             )
         )
 
     def _compile_contact_pairs(
         self,
         root: ET.Element,
-        contact_pair_candidates: list[tuple[str, str, int, int, str]],
+        contact_pair_candidates: list[_ContactPairCandidate],
     ) -> None:
-        pair_elements: list[tuple[str, str]] = []
+        pair_elements: dict[tuple[str, str], dict[str, str]] = {}
         for index, first in enumerate(contact_pair_candidates):
-            first_geom, first_runtime_body, first_contype, first_conaffinity, first_kind = first
-            for second_geom, second_runtime_body, second_contype, second_conaffinity, second_kind in contact_pair_candidates[index + 1:]:
-                if first_runtime_body == second_runtime_body:
+            for second in contact_pair_candidates[index + 1:]:
+                if first.runtime_body_id == second.runtime_body_id:
                     continue
-                if not self._explicit_contact_pair_supported(first_kind, second_kind):
+                if not self._explicit_contact_pair_supported(first, second):
                     continue
                 if not self._collision_pair_enabled(
-                    first_contype,
-                    first_conaffinity,
-                    second_contype,
-                    second_conaffinity,
+                    first.contype,
+                    first.conaffinity,
+                    second.contype,
+                    second.conaffinity,
                 ):
                     continue
-                pair_elements.append((first_geom, second_geom))
+                key = self._canonical_pair_key(first.geom_name, second.geom_name)
+                pair_elements[key] = self._explicit_pair_attributes(first, second, key)
         if not pair_elements:
             return
         contact_element = ET.SubElement(root, "contact")
-        for first_geom, second_geom in pair_elements:
-            ET.SubElement(contact_element, "pair", {"geom1": first_geom, "geom2": second_geom})
+        for key in sorted(pair_elements):
+            ET.SubElement(contact_element, "pair", pair_elements[key])
 
     def _collision_pair_enabled(
         self,
@@ -360,15 +376,46 @@ class MuJoCoCompiler:
             or (second_contype & first_conaffinity)
         )
 
-    def _contact_body_kind(self, *, body: RigidBodySpec, instance: AssetInstanceSpec) -> str:
-        if body.body_type == "kinematic":
-            return "kinematic"
-        if body.body_type == "dynamic" and instance.fixed_base:
-            return "fixed_dynamic"
-        return body.body_type
+    def _body_has_dof(self, *, body: RigidBodySpec, instance: AssetInstanceSpec) -> bool:
+        return body.body_type == "dynamic" and not instance.fixed_base
 
-    def _explicit_contact_pair_supported(self, first_kind: str, second_kind: str) -> bool:
-        # MuJoCo can produce solver errors for explicit contacts involving
-        # kinematic-as-fixed placeholders. Leave those to future kinematic
-        # semantics instead of exposing fake contacts in Phase 2D1.
-        return first_kind != "kinematic" and second_kind != "kinematic"
+    def _explicit_contact_pair_supported(
+        self,
+        first: _ContactPairCandidate,
+        second: _ContactPairCandidate,
+    ) -> bool:
+        # Explicit pairs are only for no-DOF body pairs that MuJoCo's dynamic
+        # broadphase does not reliably expose as active contacts. If either
+        # side is a normal free dynamic body, contype/conaffinity should handle
+        # collision without an explicit pair.
+        return not first.has_dof and not second.has_dof
+
+    def _canonical_pair_key(self, first_geom: str, second_geom: str) -> tuple[str, str]:
+        return (first_geom, second_geom) if first_geom <= second_geom else (second_geom, first_geom)
+
+    def _explicit_pair_attributes(
+        self,
+        first: _ContactPairCandidate,
+        second: _ContactPairCandidate,
+        key: tuple[str, str],
+    ) -> dict[str, str]:
+        return {
+            "geom1": key[0],
+            "geom2": key[1],
+            "condim": str(MUJOCO_EXPLICIT_PAIR_CONDIM),
+            "friction": format_vector(self._mix_pair_friction(first.material, second.material)),
+            "margin": format_float(MUJOCO_EXPLICIT_PAIR_MARGIN),
+            "gap": format_float(MUJOCO_EXPLICIT_PAIR_GAP),
+        }
+
+    def _mix_pair_friction(
+        self,
+        first_material: PhysicsMaterialSpec,
+        second_material: PhysicsMaterialSpec,
+    ) -> tuple[float, float, float]:
+        sliding = math.sqrt(first_material.dynamic_friction * second_material.dynamic_friction)
+        return (
+            sliding,
+            MUJOCO_TORSIONAL_FRICTION,
+            MUJOCO_ROLLING_FRICTION,
+        )

@@ -241,6 +241,10 @@ def test_explicit_contact_pairs_use_collision_geoms_and_respect_filters() -> Non
     assert len(pairs) == 1
     assert pairs[0].attrib["geom1"] not in visual_names
     assert pairs[0].attrib["geom2"] not in visual_names
+    assert pairs[0].attrib["condim"] == "3"
+    assert pairs[0].attrib["margin"] == "0"
+    assert pairs[0].attrib["gap"] == "0"
+    assert pairs[0].attrib["friction"] == "0.4 0.005 0.0001"
 
 
 def test_compound_collider_has_one_inertial_and_multiple_collision_geoms() -> None:

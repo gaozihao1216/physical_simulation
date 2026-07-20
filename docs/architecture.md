@@ -30,8 +30,6 @@ GeometrySpec
 
 ## Backend Layer
 
-负责把 Physics IR 接入具体物理引擎。
-
 当前 MuJoCo 路径为：
 
 ```text
@@ -44,9 +42,37 @@ PhysicsSceneSpec
 -> SimulationStepResult
 ```
 
-`MjModel` 是加载后的 MuJoCo 模型，`MjData` 是 backend 内部可变状态。MuJoCo numeric body ID 和 geom ID 只保存在 `MuJoCoBackend` 内部，用于状态查询和后续接触映射，不进入 Physics IR 或业务层公共接口。
+`MjModel` 是加载后的 MuJoCo 模型，`MjData` 是 backend 内部可变状态。MuJoCo numeric body ID 和 geom ID 只保存在 `MuJoCoBackend` 内部，用于状态查询和接触映射，不进入 Physics IR 或业务层公共接口。
 
-Phase 2D1 的接触路径为：
+## Collision Layering
+
+Dynamic collision 使用 MuJoCo 原生碰撞过滤：
+
+```text
+collision_group -> contype
+collision_mask  -> conaffinity
+```
+
+dynamic-dynamic、dynamic-static、dynamic-fixed 组合不生成 explicit pair，由 MuJoCo 自动碰撞机制处理。
+
+Explicit pair 仅用于需要强制启用的 fixed-fixed collision：
+
+```text
+both bodies have no DoF
++ collision group/mask allows collision
++ different runtime bodies
+-> <contact><pair ... /></contact>
+```
+
+Visual geom 永远不进入 explicit pair。同一 runtime body 内部的多个 collider 永远不互相生成 pair。pair 使用 canonical geom-name key 去重并稳定排序。
+
+显式 pair 使用自身的 contact 参数：`condim=3`、`margin=0`、`gap=0`。friction 使用两个材质 `dynamic_friction` 的几何平均作为 sliding friction，并固定 torsional friction 为 `0.005`、rolling friction 为 `0.0001`。`static_friction` 和 `restitution` 暂未映射。`solref` / `solimp` 没有对应 Physics IR 参数，因此使用 MuJoCo 默认值。
+
+## Runtime Layer
+
+Phase 2C2 已支持 reset、单步 step、刚体世界位姿读取、世界线速度和角速度读取，并把结果封装为后端无关的 `SimulationStepResult` 快照。
+
+Phase 2D1 已支持把 MuJoCo active contacts 映射为 `ContactPoint`，并随 `SimulationStepResult.contacts` 返回：
 
 ```text
 MjData contacts
@@ -55,15 +81,7 @@ MjData contacts
 -> SimulationStepResult
 ```
 
-MuJoCo geom IDs 是 backend-private。`ContactPoint` 只包含 runtime body IDs、世界接触点、从 `body_a` 指向 `body_b` 的单位法向和非负穿透深度。接触力、摩擦力和冲量不在 Phase 2D1 中读取。
-
-## Runtime Layer
-
-负责 reset、step、状态查询、接触事件、传感器更新和确定性执行。
-
-Phase 2C2 已支持 reset、单步 step、刚体世界位姿读取、世界线速度和角速度读取，并把结果封装为后端无关的 `SimulationStepResult` 快照。
-
-Phase 2D1 已支持把 MuJoCo active contacts 映射为 `ContactPoint`，并随 `SimulationStepResult.contacts` 返回。接触力和接触冲量留到后续阶段。
+`ContactPoint` 只包含 runtime body IDs、世界接触点、从 `body_a` 指向 `body_b` 的单位法向和非负穿透深度。接触力、摩擦力和冲量不在当前阶段读取。
 
 ## Robot Task Layer
 

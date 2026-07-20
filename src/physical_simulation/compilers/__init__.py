@@ -8,6 +8,11 @@ from physical_simulation.compilers.errors import (
 )
 from physical_simulation.compilers.mujoco_compiler import (
     MUJOCO_ALL_COLLISION_BITS,
+    MUJOCO_EXPLICIT_PAIR_CONDIM,
+    MUJOCO_EXPLICIT_PAIR_GAP,
+    MUJOCO_EXPLICIT_PAIR_MARGIN,
+    MUJOCO_ROLLING_FRICTION,
+    MUJOCO_TORSIONAL_FRICTION,
     MuJoCoCompiler,
     geometry_to_mujoco,
     make_mujoco_name,
@@ -22,6 +27,11 @@ __all__ = [
     "UnsupportedAssetStructureError",
     "MuJoCoCompilationError",
     "MUJOCO_ALL_COLLISION_BITS",
+    "MUJOCO_EXPLICIT_PAIR_CONDIM",
+    "MUJOCO_EXPLICIT_PAIR_MARGIN",
+    "MUJOCO_EXPLICIT_PAIR_GAP",
+    "MUJOCO_TORSIONAL_FRICTION",
+    "MUJOCO_ROLLING_FRICTION",
     "geometry_to_mujoco",
     "make_mujoco_name",
 ]

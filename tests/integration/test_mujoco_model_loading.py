@@ -157,9 +157,9 @@ def test_static_dynamic_fixed_and_kinematic_load_with_expected_joints() -> None:
         scene_id="body_types",
         instances=(
             AssetInstanceSpec("static", static),
-            AssetInstanceSpec("dynamic", dynamic),
-            AssetInstanceSpec("fixed_dynamic", fixed_dynamic, fixed_base=True),
-            AssetInstanceSpec("kinematic", kinematic),
+            AssetInstanceSpec("dynamic", dynamic, Transform(position=(2.0, 0.0, 0.0))),
+            AssetInstanceSpec("fixed_dynamic", fixed_dynamic, Transform(position=(4.0, 0.0, 0.0)), fixed_base=True),
+            AssetInstanceSpec("kinematic", kinematic, Transform(position=(6.0, 0.0, 0.0))),
         ),
     )
     backend = MuJoCoBackend()
