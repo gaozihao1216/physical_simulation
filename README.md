@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射，以及基础 drop/resting-contact 轨迹评估。接触力、冲量、关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取，以及基础 drop/resting-contact 轨迹评估。冲量、关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -67,8 +67,8 @@ physical_simulation/
 - `dynamics`：质量、重心、惯量、力、力矩和刚体动力学配置。
 - `articulation`：关节、运动轴、自由度、限制和执行器；当前仍是预留模块。
 - `compilers`：把后端无关的 `PhysicsSceneSpec` 编译为具体后端输入；当前支持 MJCF 生成。
-- `backends`：MuJoCo、Isaac Sim 等物理后端适配器；当前支持 MuJoCo 模型加载、reset、单步推进、刚体状态读取和 contact 映射。
-- `runtime`：运行时状态对象，包括 `RigidBodyState`、`JointState`、`ContactPoint` 和 `SimulationStepResult`。
+- `backends`：MuJoCo、Isaac Sim 等物理后端适配器；当前支持 MuJoCo 模型加载、reset、单步推进、刚体状态读取、contact 映射和单点 contact wrench 读取。
+- `runtime`：运行时状态对象，包括 `RigidBodyState`、`JointState`、`ContactPoint`、`ContactWrench` 和 `SimulationStepResult`。
 - `robots`：机器人模型加载、控制器和夹爪控制；当前仍是预留模块。
 - `tasks`：下落、推动、稳定性、关节运动和抓取等测试任务；当前仍是预留模块。
 - `evaluation`：仿真指标、失败分类和评估报告；当前仍是预留模块。
@@ -85,7 +85,8 @@ physical_simulation/
 - Phase 2D1：MuJoCo Contact Mapping。
 - Phase 2D1.5：Explicit Contact Pair Semantics Audit。
 - Phase 2D2：Drop and Resting Contact Validation。
-- Phase 2D3：Contact Force and Impulse。
+- Phase 2D3A：MuJoCo Contact Wrench Extraction。
+- Phase 2D3B：Contact Force Aggregation and Impulse（计划中）。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -108,18 +109,36 @@ physical_simulation/
 - explicit pair 参数：`condim=3`、`margin=0`、`gap=0`。
 - explicit pair friction：sliding friction 使用两个 `dynamic_friction` 的几何平均；torsional friction 为 `0.005`；rolling friction 为 `0.0001`。
 
-尚未支持：
-
-- normal force
-- tangential force
-- contact impulse
-- resting stability evaluation
-- friction validation
-- restitution validation
-- task success metrics
-- robot interaction
+Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标；单点接触力读取从 Phase 2D3A 开始提供。
 
 `static_friction` 和 `restitution` 当前暂未映射到 MJCF explicit pair。`solref` 和 `solimp` 没有对应 Physics IR 参数，因此不显式设置，使用 MuJoCo 默认值。
+
+## Phase 2D3A 当前能力
+
+已支持：
+
+- `MuJoCoBackend.get_contact_wrenches()`：为当前每个公开 `ContactPoint` 返回一个对应的 `ContactWrench`。
+- `mj_contactForce`：读取 MuJoCo 求解器针对单个 contact index 输出的接触力和接触力矩。
+- contact-frame -> world-frame：MuJoCo `contact.frame` 的三条轴按行存储，局部力和力矩通过 `frame.T @ vector` 转换到世界坐标。
+- force on body_a/body_b：先按 MuJoCo geom1/geom2 原始方向解释受力，再映射到公开的 `body_a/body_b`，不通过 public normal 猜测原始方向。
+- pure contact torque：`ContactWrench.contact_torque_on_body_*_world` 表示接触点处的纯接触力矩，不包含 `(contact_position - body_center) x contact_force`，因此不是关于刚体质心的总力矩。
+- normal/tangential force magnitude：在公开 `ContactPoint.normal` 约定下分解施加到 `body_b` 的世界接触力，两个 magnitude 均保证非负。
+- inactive contact：`efc_address < 0` 时仍返回一一对应的 `ContactWrench`，但力、力矩和 magnitude 为零。
+- static support-force validation：1 kg box 和 sphere 的静置总支撑力接近 `9.81 N`。
+- impact force extraction：下落碰撞瞬间可以读取正的法向接触力。
+
+当前仍未支持：
+
+- 跨接触点聚合 API。
+- 关于刚体质心的 net contact torque。
+- time-integrated impulse / collision impulse。
+- 初始速度配置。
+- `apply_force`。
+- 定量摩擦验证。
+- restitution mapping。
+- joints、robots、meshes、GUI 和完整 task framework。
+
+`ContactPoint` 仍只描述接触几何，`normal_force` 与 `tangential_force` 在当前阶段保持为 `None`。`ContactWrench` 描述求解器在该接触点产生的作用力，不修改 `SimulationStepResult` 字段。
 
 ## Phase 2D2 当前能力
 
@@ -138,7 +157,6 @@ physical_simulation/
 
 当前仍未支持：
 
-- contact force
 - contact impulse
 - restitution mapping
 - quantitative friction validation

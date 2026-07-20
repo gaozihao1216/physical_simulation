@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from physical_simulation.backends.base import PhysicsBackend
@@ -16,9 +17,12 @@ from physical_simulation.backends.errors import (
     UnknownRuntimeGeomError,
 )
 from physical_simulation.compilers import MuJoCoCompilationResult, MuJoCoCompiler
-from physical_simulation.runtime import ContactPoint, RigidBodyState, SimulationStepResult
+from physical_simulation.runtime import ContactPoint, ContactWrench, RigidBodyState, SimulationStepResult
 from physical_simulation.scene import PhysicsSceneSpec
 from physical_simulation.validation.asset_validator import validate_physics_scene
+
+
+Vector3 = tuple[float, float, float]
 
 
 def _import_mujoco():
@@ -51,6 +55,58 @@ def _resolve_geom_id(mujoco_module: Any, model: Any, geom_name: str) -> int:
             f"MuJoCo geom name was not found in loaded model; geom_name={geom_name!r}"
         )
     return geom_id
+
+
+@dataclass(frozen=True)
+class _MappedMuJoCoContact:
+    contact_index: int
+    contact_point: ContactPoint
+    geom1_id: int
+    geom2_id: int
+    geom1_runtime_body_id: str
+    geom2_runtime_body_id: str
+
+
+def _get_contact_geom_ids(contact: Any) -> tuple[int, int]:
+    """Return MuJoCo contact geom IDs across supported Python bindings."""
+    geom = getattr(contact, "geom", None)
+    if geom is not None:
+        return int(geom[0]), int(geom[1])
+    return int(contact.geom1), int(contact.geom2)
+
+
+def _contact_frame_vector_to_world(frame: object, vector: object) -> Vector3:
+    """Convert a contact-frame vector to world coordinates."""
+    import numpy as np
+
+    frame_rows = np.asarray(frame, dtype=float)
+    vector_array = np.asarray(vector, dtype=float)
+    if frame_rows.shape != (9,):
+        raise MuJoCoRuntimeError(f"contact frame must contain 9 values; actual_shape={frame_rows.shape!r}")
+    if vector_array.shape != (3,):
+        raise MuJoCoRuntimeError(f"contact vector must contain 3 values; actual_shape={vector_array.shape!r}")
+    if not bool(np.all(np.isfinite(frame_rows))):
+        raise MuJoCoRuntimeError(f"contact frame contains non-finite values; frame={frame!r}")
+    if not bool(np.all(np.isfinite(vector_array))):
+        raise MuJoCoRuntimeError(f"contact vector contains non-finite values; vector={vector!r}")
+    world = frame_rows.reshape(3, 3).T @ vector_array
+    return tuple(float(value) for value in world)
+
+
+def _negate_vector(vector: Vector3) -> Vector3:
+    return tuple(-value for value in vector)
+
+
+def _add_vectors(first: Vector3, second: Vector3) -> Vector3:
+    return tuple(first[index] + second[index] for index in range(3))
+
+
+def _dot(first: Vector3, second: Vector3) -> float:
+    return sum(first[index] * second[index] for index in range(3))
+
+
+def _norm(vector: Vector3) -> float:
+    return math.sqrt(_dot(vector, vector))
 
 
 class MuJoCoBackend(PhysicsBackend):
@@ -307,12 +363,12 @@ class MuJoCoBackend(PhysicsBackend):
     def get_contacts(self) -> tuple[ContactPoint, ...]:
         """Return the current MuJoCo active contacts as backend-independent snapshots."""
         self._require_loaded("get_contacts")
-        contacts: list[ContactPoint] = []
-        for index in range(int(self._data.ncon)):
-            converted = self._convert_mujoco_contact(self._data.contact[index])
-            if converted is not None:
-                contacts.append(converted)
-        return tuple(sorted(contacts, key=self._contact_sort_key))
+        return tuple(mapped.contact_point for mapped in self._extract_mapped_contacts())
+
+    def get_contact_wrenches(self) -> tuple[ContactWrench, ...]:
+        """Return solver-produced contact wrenches for the current MuJoCo contacts."""
+        self._require_loaded("get_contact_wrenches")
+        return tuple(self._build_contact_wrench(mapped) for mapped in self._extract_mapped_contacts())
 
     def apply_force(self, body_id: str, force: Any, point: Optional[Any] = None) -> None:
         """Force application is not implemented in Phase 2C2."""
@@ -401,9 +457,23 @@ class MuJoCoBackend(PhysicsBackend):
                         f"time={self._current_time()}; field={field_name!r}; value={value!r}"
                     )
 
-    def _convert_mujoco_contact(self, contact: Any) -> Optional[ContactPoint]:
-        geom1 = int(contact.geom1)
-        geom2 = int(contact.geom2)
+    def _extract_mapped_contacts(self) -> tuple[_MappedMuJoCoContact, ...]:
+        mapped_contacts: list[_MappedMuJoCoContact] = []
+        for index in range(int(self._data.ncon)):
+            mapped = self._convert_mujoco_contact(index, self._data.contact[index])
+            if mapped is not None:
+                mapped_contacts.append(mapped)
+        return tuple(sorted(mapped_contacts, key=self._mapped_contact_sort_key))
+
+    def _convert_mujoco_contact(
+        self,
+        contact_index: int | Any,
+        contact: Optional[Any] = None,
+    ) -> Optional[_MappedMuJoCoContact]:
+        if contact is None:
+            contact = contact_index
+            contact_index = 0
+        geom1, geom2 = _get_contact_geom_ids(contact)
         first_body = self._get_runtime_body_for_geom_id(geom1)
         second_body = self._get_runtime_body_for_geom_id(geom2)
         if first_body == second_body:
@@ -421,7 +491,7 @@ class MuJoCoBackend(PhysicsBackend):
                 "penetration_depth": (penetration_depth,),
             },
         )
-        return ContactPoint(
+        contact_point = ContactPoint(
             body_a=body_a,
             body_b=body_b,
             position=position,
@@ -430,6 +500,125 @@ class MuJoCoBackend(PhysicsBackend):
             normal_force=None,
             tangential_force=None,
         )
+        return _MappedMuJoCoContact(
+            contact_index=int(contact_index),
+            contact_point=contact_point,
+            geom1_id=geom1,
+            geom2_id=geom2,
+            geom1_runtime_body_id=first_body,
+            geom2_runtime_body_id=second_body,
+        )
+
+    def _build_contact_wrench(self, mapped: _MappedMuJoCoContact) -> ContactWrench:
+        raw_contact = self._data.contact[mapped.contact_index]
+        force_on_geom2, torque_on_geom2 = self._read_contact_force_torque_world(mapped.contact_index, raw_contact)
+        (
+            force_on_body_a,
+            torque_on_body_a,
+            force_on_body_b,
+            torque_on_body_b,
+        ) = self._assign_wrench_to_public_bodies(
+            contact_point=mapped.contact_point,
+            geom1_body_id=mapped.geom1_runtime_body_id,
+            geom2_body_id=mapped.geom2_runtime_body_id,
+            force_on_geom2_world=force_on_geom2,
+            torque_on_geom2_world=torque_on_geom2,
+        )
+        self._validate_newton_third_law(mapped, force_on_body_a, force_on_body_b, torque_on_body_a, torque_on_body_b)
+        normal_force_magnitude, tangential_force_magnitude = self._decompose_contact_force(
+            mapped,
+            force_on_body_b,
+        )
+        return ContactWrench(
+            contact=mapped.contact_point,
+            force_on_body_a_world=force_on_body_a,
+            contact_torque_on_body_a_world=torque_on_body_a,
+            force_on_body_b_world=force_on_body_b,
+            contact_torque_on_body_b_world=torque_on_body_b,
+            normal_force_magnitude=normal_force_magnitude,
+            tangential_force_magnitude=tangential_force_magnitude,
+        )
+
+    def _read_contact_force_torque_world(self, contact_index: int, raw_contact: Any) -> tuple[Vector3, Vector3]:
+        if int(getattr(raw_contact, "efc_address", -1)) < 0:
+            return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        mujoco = _import_mujoco()
+        import numpy as np
+
+        force_torque_local = np.zeros(6, dtype=float)
+        mujoco.mj_contactForce(self._model, self._data, int(contact_index), force_torque_local)
+        if not bool(np.all(np.isfinite(force_torque_local))):
+            raise MuJoCoRuntimeError(
+                f"MuJoCo contact force contains non-finite values; scene_id={self._current_scene_id()!r}; "
+                f"step_index={self._step_index}; time={self._current_time()}; contact_index={contact_index}; "
+                f"force_torque_local={force_torque_local!r}"
+            )
+        force_world = _contact_frame_vector_to_world(raw_contact.frame, force_torque_local[:3])
+        torque_world = _contact_frame_vector_to_world(raw_contact.frame, force_torque_local[3:])
+        return force_world, torque_world
+
+    def _assign_wrench_to_public_bodies(
+        self,
+        *,
+        contact_point: ContactPoint,
+        geom1_body_id: str,
+        geom2_body_id: str,
+        force_on_geom2_world: Vector3,
+        torque_on_geom2_world: Vector3,
+    ) -> tuple[Vector3, Vector3, Vector3, Vector3]:
+        force_on_geom1_world = _negate_vector(force_on_geom2_world)
+        torque_on_geom1_world = _negate_vector(torque_on_geom2_world)
+        if contact_point.body_a == geom1_body_id and contact_point.body_b == geom2_body_id:
+            return force_on_geom1_world, torque_on_geom1_world, force_on_geom2_world, torque_on_geom2_world
+        if contact_point.body_a == geom2_body_id and contact_point.body_b == geom1_body_id:
+            return force_on_geom2_world, torque_on_geom2_world, force_on_geom1_world, torque_on_geom1_world
+        raise MuJoCoRuntimeError(
+            f"contact body mapping is inconsistent; scene_id={self._current_scene_id()!r}; "
+            f"step_index={self._step_index}; time={self._current_time()}; "
+            f"contact_body_a={contact_point.body_a!r}; contact_body_b={contact_point.body_b!r}; "
+            f"geom1_body_id={geom1_body_id!r}; geom2_body_id={geom2_body_id!r}"
+        )
+
+    def _decompose_contact_force(self, mapped: _MappedMuJoCoContact, force_on_body_b: Vector3) -> tuple[float, float]:
+        normal_component = _dot(force_on_body_b, mapped.contact_point.normal)
+        if normal_component < -1.0e-10:
+            raise MuJoCoRuntimeError(
+                f"contact normal force has unexpected negative direction; scene_id={self._current_scene_id()!r}; "
+                f"step_index={self._step_index}; time={self._current_time()}; "
+                f"contact_index={mapped.contact_index}; geom1={mapped.geom1_id!r}; geom2={mapped.geom2_id!r}; "
+                f"body_a={mapped.contact_point.body_a!r}; body_b={mapped.contact_point.body_b!r}; "
+                f"normal={mapped.contact_point.normal!r}; force_on_body_b={force_on_body_b!r}; "
+                f"normal_component={normal_component!r}"
+            )
+        normal_force_magnitude = max(0.0, normal_component)
+        tangential = tuple(
+            force_on_body_b[index] - normal_force_magnitude * mapped.contact_point.normal[index]
+            for index in range(3)
+        )
+        return normal_force_magnitude, _norm(tangential)
+
+    def _validate_newton_third_law(
+        self,
+        mapped: _MappedMuJoCoContact,
+        force_on_body_a: Vector3,
+        force_on_body_b: Vector3,
+        torque_on_body_a: Vector3,
+        torque_on_body_b: Vector3,
+    ) -> None:
+        force_sum = _add_vectors(force_on_body_a, force_on_body_b)
+        torque_sum = _add_vectors(torque_on_body_a, torque_on_body_b)
+        force_tol = max(1.0e-9, 1.0e-12 * max(1.0, _norm(force_on_body_a), _norm(force_on_body_b)))
+        torque_tol = max(1.0e-9, 1.0e-12 * max(1.0, _norm(torque_on_body_a), _norm(torque_on_body_b)))
+        if _norm(force_sum) > force_tol or _norm(torque_sum) > torque_tol:
+            raise MuJoCoRuntimeError(
+                f"contact wrench violates Newton's third law; scene_id={self._current_scene_id()!r}; "
+                f"step_index={self._step_index}; time={self._current_time()}; "
+                f"contact_index={mapped.contact_index}; geom1={mapped.geom1_id!r}; geom2={mapped.geom2_id!r}; "
+                f"geom1_body_id={mapped.geom1_runtime_body_id!r}; geom2_body_id={mapped.geom2_runtime_body_id!r}; "
+                f"force_on_body_a={force_on_body_a!r}; force_on_body_b={force_on_body_b!r}; "
+                f"torque_on_body_a={torque_on_body_a!r}; torque_on_body_b={torque_on_body_b!r}; "
+                f"force_sum={force_sum!r}; torque_sum={torque_sum!r}"
+            )
 
     def _get_runtime_body_for_geom_id(self, geom_id: int) -> str:
         try:
@@ -468,9 +657,10 @@ class MuJoCoBackend(PhysicsBackend):
             normal = tuple(-value for value in normal)
         norm = math.sqrt(sum(value * value for value in normal))
         if norm <= 1.0e-12:
+            geom1, geom2 = _get_contact_geom_ids(contact)
             raise MuJoCoRuntimeError(
                 f"MuJoCo contact normal has near-zero length; scene_id={self._current_scene_id()!r}; "
-                f"geom1={int(contact.geom1)!r}; geom2={int(contact.geom2)!r}; "
+                f"geom1={geom1!r}; geom2={geom2!r}; "
                 f"step_index={self._step_index}; time={self._current_time()}; field='normal'"
             )
         return tuple(value / norm for value in normal)
@@ -499,6 +689,9 @@ class MuJoCoBackend(PhysicsBackend):
             *(round(value, 12) for value in contact.normal),
             round(contact.penetration_depth, 12),
         )
+
+    def _mapped_contact_sort_key(self, mapped: _MappedMuJoCoContact) -> tuple[object, ...]:
+        return (*self._contact_sort_key(mapped.contact_point), mapped.contact_index)
 
     def _current_time(self) -> float:
         if self._data is None:

@@ -65,9 +65,9 @@ def test_body_ordering_flips_normal_when_sorted_order_swaps() -> None:
     contact = backend._convert_mujoco_contact(_fake_contact(2, 1, normal=(0.0, 0.0, 5.0)))
 
     assert contact is not None
-    assert contact.body_a == "box_01/box_body"
-    assert contact.body_b == "ground_01/ground_body"
-    assert contact.normal == pytest.approx((0.0, 0.0, -1.0))
+    assert contact.contact_point.body_a == "box_01/box_body"
+    assert contact.contact_point.body_b == "ground_01/ground_body"
+    assert contact.contact_point.normal == pytest.approx((0.0, 0.0, -1.0))
 
 
 def test_normal_is_normalized_and_forces_are_not_filled() -> None:
@@ -75,10 +75,10 @@ def test_normal_is_normalized_and_forces_are_not_filled() -> None:
     contact = backend._convert_mujoco_contact(_fake_contact(1, 2, normal=(0.0, 0.0, 3.0)))
 
     assert contact is not None
-    assert contact.normal == pytest.approx((0.0, 0.0, 1.0))
-    assert math.sqrt(sum(value * value for value in contact.normal)) == pytest.approx(1.0)
-    assert contact.normal_force is None
-    assert contact.tangential_force is None
+    assert contact.contact_point.normal == pytest.approx((0.0, 0.0, 1.0))
+    assert math.sqrt(sum(value * value for value in contact.contact_point.normal)) == pytest.approx(1.0)
+    assert contact.contact_point.normal_force is None
+    assert contact.contact_point.tangential_force is None
 
 
 def test_penetration_depth_is_non_negative_and_positive_dist_becomes_zero() -> None:
@@ -88,8 +88,8 @@ def test_penetration_depth_is_non_negative_and_positive_dist_becomes_zero() -> N
 
     assert penetrating is not None
     assert separated is not None
-    assert penetrating.penetration_depth == pytest.approx(0.125)
-    assert separated.penetration_depth == pytest.approx(0.0)
+    assert penetrating.contact_point.penetration_depth == pytest.approx(0.125)
+    assert separated.contact_point.penetration_depth == pytest.approx(0.0)
 
 
 def test_position_is_python_tuple_and_multiple_points_are_not_deduplicated() -> None:
@@ -113,7 +113,7 @@ def test_contact_sorting_is_stable() -> None:
 
     assert first is not None
     assert second is not None
-    assert sorted((first, second), key=backend._contact_sort_key) == [second, first]
+    assert sorted((first, second), key=backend._mapped_contact_sort_key) == [second, first]
 
 
 def test_non_finite_contact_data_is_rejected() -> None:

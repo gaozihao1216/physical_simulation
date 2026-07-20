@@ -75,13 +75,25 @@ Phase 2C2 已支持 reset、单步 step、刚体世界位姿读取、世界线�
 Phase 2D1 已支持把 MuJoCo active contacts 映射为 `ContactPoint`，并随 `SimulationStepResult.contacts` 返回：
 
 ```text
-MjData contacts
+MjData.contact
 -> MuJoCoBackend contact adapter
 -> ContactPoint
 -> SimulationStepResult
 ```
 
-`ContactPoint` 只包含 runtime body IDs、世界接触点、从 `body_a` 指向 `body_b` 的单位法向和非负穿透深度。接触力、摩擦力和冲量不在当前阶段读取。
+Phase 2D3A 在不修改 `SimulationStepResult` 的前提下，增加了单点 contact wrench 读取：
+
+```text
+MjData.contact
+-> mapped ContactPoint
+-> mj_contactForce
+-> contact-frame wrench
+-> world-frame ContactWrench
+```
+
+`ContactPoint` 只包含 runtime body IDs、世界接触点、从 `body_a` 指向 `body_b` 的单位法向和非负穿透深度；`normal_force` 与 `tangential_force` 当前保持为 `None`。`ContactWrench` 描述 MuJoCo 求解器在该接触点产生的作用力和纯接触力矩。contact torque 不包含 `(contact_position - body_center) x contact_force`，因此不是关于刚体质心的 net torque。
+
+MuJoCo backend 内部用私有 mapped contact 同时保存 raw contact index、geom IDs、runtime body IDs 和公开 `ContactPoint`，`get_contacts()` 与 `get_contact_wrenches()` 复用同一提取路径。这样可以保证两者顺序一致，并避免从排序后的 `ContactPoint` 反向猜测原始 `data.contact`。
 
 ## Evaluation Layer
 
@@ -94,7 +106,7 @@ MuJoCoBackend
 -> RestingContactMetrics
 ```
 
-Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。
+Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`，但当前仍不进行冲量积分、跨接触点聚合或关于刚体质心的 net wrench 计算。
 
 `simulate_body_trajectory()` 会对已加载的 backend 调用 `reset()`，记录 reset 后样本，然后推进固定步数并记录目标 body 的 `RigidBodyState` 与当前 contacts。`evaluate_resting_contact()` 使用最后窗口内的速度、位置漂移和四元数角距离判断 `settled`。
 
@@ -104,4 +116,4 @@ Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，�
 
 当前仍未实现，后续会基于 Runtime Layer 提供的状态和控制接口构建。
 
-后续完整任务评估、失败分类、接触力/冲量分析和机器人交互评估仍未实现。
+后续完整任务评估、失败分类、接触冲量分析、接触点聚合和机器人交互评估仍未实现。
