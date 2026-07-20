@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已完成 Phase 1、Phase 1.5、Phase 2A、Phase 2B，并完成 Phase 2C1 的 MuJoCo 模型加载与 ID 映射。项目仍未实现完整仿真循环、接触查询、关节系统、机器人控制或动态评估。
+当前已完成 Phase 1、Phase 1.5、Phase 2A、Phase 2B、Phase 2C1 和 Phase 2C2。项目已经可以通过 MuJoCo 加载场景、reset、推进单步仿真，并读取刚体世界状态，但仍未实现接触映射、力控制、关节系统、机器人任务或动态评估。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -48,9 +48,6 @@ physical_simulation/
 |       |   `-- mujoco_backend.py
 |       |-- collision/
 |       |-- compilers/
-|       |   |-- errors.py
-|       |   |-- mujoco_compiler.py
-|       |   `-- mujoco_types.py
 |       |-- dynamics/
 |       |-- evaluation/
 |       |-- robots/
@@ -68,13 +65,13 @@ physical_simulation/
 
 ## 各模块职责
 
-- `assets`：物理资产、刚体、碰撞体、材料、场景内基础几何等数据结构。
+- `assets`：物理资产、刚体、碰撞体、材料、基础几何、质量属性和物理资产构造器。
 - `collision`：碰撞几何生成、primitive fitting、凸包和凸分解；当前仍是预留模块。
 - `dynamics`：质量、重心、惯量、力、力矩和刚体动力学配置。
 - `articulation`：关节、运动轴、自由度、限制和执行器；当前仍是预留模块。
 - `compilers`：把后端无关的 `PhysicsSceneSpec` 编译为具体后端输入；当前支持 MJCF 生成。
-- `backends`：MuJoCo、Isaac Sim 等物理后端适配器；当前支持 Phase 2C1 的 MuJoCo 模型加载与私有 ID 映射。
-- `runtime`：仿真循环、状态管理、接触事件和传感器更新；当前只有运行时状态值对象。
+- `backends`：MuJoCo、Isaac Sim 等物理后端适配器；当前支持 MuJoCo 模型加载、reset、单步推进和刚体状态读取。
+- `runtime`：运行时状态对象，包括 `RigidBodyState`、`JointState`、`ContactPoint` 和 `SimulationStepResult`。
 - `robots`：机器人模型加载、控制器和夹爪控制；当前仍是预留模块。
 - `tasks`：下落、推动、稳定性、关节运动和抓取等测试任务；当前仍是预留模块。
 - `evaluation`：仿真指标、失败分类和评估报告；当前仍是预留模块。
@@ -94,41 +91,45 @@ physical_simulation/
 - Phase 2A：Transform Composition。
 - Phase 2B：PhysicsSceneSpec -> MJCF Compiler。
 - Phase 2C1：MuJoCo Model Loading and ID Mapping。
-- Phase 2C2：MuJoCo reset / step / body state extraction。
+- Phase 2C2：Reset, Step and Rigid-Body State。
+- Phase 2D：Contact Mapping and Contact State。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
 - Phase 6：Robot Tasks。
 - Phase 7：Dynamic Evaluation。
 
-## Phase 2C1 当前能力
+## Phase 2C2 当前能力
 
 已支持：
 
-- `mujoco` 作为可选依赖，通过 `pip install -e ".[mujoco]"` 安装。
-- `MuJoCoBackend.load_scene(scene)` 将 `PhysicsSceneSpec` 编译为 MJCF，并加载为真实 `mujoco.MjModel` 与 `mujoco.MjData`。
-- 将 runtime body ID 映射为 MuJoCo 私有 numeric body ID。
-- 将 collision geom numeric ID 映射回 runtime body ID。
-- 支持重复加载、失败加载后保留旧状态、`close()` 清理内部状态。
-- 真实 MuJoCo 集成测试覆盖 timestep、gravity、质量、惯量、body ID、geom ID、多实例和 compound collider。
+- `MuJoCoBackend.reset()`：使用 MuJoCo 官方 reset API，并恢复加载时保存的 `qpos`、`qvel` 和 `act` 初始快照。
+- `MuJoCoBackend.step(action=None)`：每次只推进一个 physics timestep，不做 decimation、不 sleep、不启动 viewer。
+- simulation time：从真实 `MjData.time` 读取。
+- step index：由 backend 维护，加载和 reset 后为 0，每次 step 增加 1。
+- world body pose：从 MuJoCo `xpos` 和 `xquat` 读取，四元数顺序保持 `(w, x, y, z)`。
+- world linear velocity 与 angular velocity：使用 `mj_objectVelocity` 读取世界方向六维速度，并按 MuJoCo `rot:lin` 顺序拆分。
+- `SimulationStepResult`：返回稳定顺序的 `RigidBodyState` 快照，当前 `joint_states=()` 且 `contacts=()`。
+- free-fall simulation：支持无接触自由落体趋势测试。
+- reset determinism：相同步数运行在 reset 后可复现。
 
 尚未支持：
 
-- `reset`
-- `step`
-- `get_body_state`
-- `get_contacts`
+- contact extraction
+- contact force
 - `apply_force`
-- joint state
-- robot task
-- mesh geometry
-- GUI / visualization
+- joint
+- actuator
+- robot
+- mesh
+- GUI
+- task evaluation
 
 ## 当前项目状态
 
-项目骨架阶段，尚未实现完整仿真功能。
+项目仍处于早期仿真基础设施阶段，尚未实现完整仿真功能。
 
-当前代码已经具备可验证的 Physics IR、场景表示、MJCF 编译和 MuJoCo 模型加载能力，但还没有可用的仿真循环与机器人任务执行。
+当前代码已经具备可验证的 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步推进和刚体状态读取能力。接触、关节、机器人和评估仍是后续阶段。
 
 ## 开发原则
 

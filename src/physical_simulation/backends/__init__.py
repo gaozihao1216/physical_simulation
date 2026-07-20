@@ -4,8 +4,10 @@ from physical_simulation.backends.base import PhysicsBackend
 from physical_simulation.backends.errors import (
     BackendNotLoadedError,
     MuJoCoModelLoadingError,
+    MuJoCoRuntimeError,
     MuJoCoUnavailableError,
     PhysicsBackendError,
+    UnsupportedBackendOperationError,
     UnknownRuntimeBodyError,
     UnknownRuntimeGeomError,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "BackendNotLoadedError",
     "MuJoCoUnavailableError",
     "MuJoCoModelLoadingError",
+    "MuJoCoRuntimeError",
+    "UnsupportedBackendOperationError",
     "UnknownRuntimeBodyError",
     "UnknownRuntimeGeomError",
 ]

@@ -6,6 +6,8 @@ TODO: Extend type definitions alongside the Physics IR.
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
+from physical_simulation.runtime import RigidBodyState, SimulationStepResult
+
 
 class PhysicsBackend(ABC):
     """Minimal abstract interface for simulation backends."""
@@ -15,15 +17,15 @@ class PhysicsBackend(ABC):
         """Load a scene into the backend."""
 
     @abstractmethod
-    def reset(self, seed: Optional[int] = None) -> None:
+    def reset(self) -> SimulationStepResult:
         """Reset backend state."""
 
     @abstractmethod
-    def step(self, dt: float) -> None:
+    def step(self, action: object | None = None) -> SimulationStepResult:
         """Advance simulation by one time step."""
 
     @abstractmethod
-    def get_body_state(self, body_id: str) -> Any:
+    def get_body_state(self, runtime_body_id: str) -> RigidBodyState:
         """Return state for a body."""
 
     @abstractmethod

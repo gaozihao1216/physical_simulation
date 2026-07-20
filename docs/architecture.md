@@ -26,37 +26,33 @@ GeometrySpec
 -> PhysicsSceneSpec
 ```
 
-`PhysicsSceneSpec` 是后端编译与运行时加载的输入。IR 中使用稳定的业务 ID 与 runtime body ID，不保存 MuJoCo numeric ID。
+`PhysicsSceneSpec` 是不可变模型输入。IR 中使用稳定的业务 ID 与 runtime body ID，不保存 MuJoCo numeric ID。
 
 ## Backend Layer
 
 负责把 Physics IR 接入具体物理引擎。
 
-Phase 2B 编译路径：
+当前 MuJoCo 路径为：
 
 ```text
 PhysicsSceneSpec
 -> MuJoCoCompiler
 -> MuJoCoCompilationResult
 -> MJCF
+-> mujoco.MjModel / mujoco.MjData
+-> reset / step
+-> SimulationStepResult
 ```
 
-Phase 2C1 加载路径：
-
-```text
-MJCF
--> mujoco.MjModel
--> mujoco.MjData
--> backend-private numeric ID mappings
-```
-
-MuJoCo numeric body ID 和 geom ID 只保存在 `MuJoCoBackend` 内部，用于后续状态查询、接触映射和力施加。它们不进入 Physics IR，也不作为业务层公共标识。
+`MjModel` 是加载后的 MuJoCo 模型，`MjData` 是 backend 内部可变状态。MuJoCo numeric body ID 和 geom ID 只保存在 `MuJoCoBackend` 内部，用于状态查询和后续接触映射，不进入 Physics IR 或业务层公共接口。
 
 ## Runtime Layer
 
 负责 reset、step、状态查询、接触事件、传感器更新和确定性执行。
 
-当前只定义运行时状态值对象。Phase 2C1 不实现 reset、step、body state、contact 或 force。
+Phase 2C2 已支持 reset、单步 step、刚体世界位姿读取、世界线速度和角速度读取，并把结果封装为后端无关的 `SimulationStepResult` 快照。
+
+当前 `SimulationStepResult.contacts` 始终为空，即使 MuJoCo 内部已经产生接触。接触提取和映射留到 Phase 2D。
 
 ## Robot Task Layer
 

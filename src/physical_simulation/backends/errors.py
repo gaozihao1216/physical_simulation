@@ -17,6 +17,14 @@ class MuJoCoModelLoadingError(PhysicsBackendError):
     """Raised when MJCF cannot be loaded into a MuJoCo model."""
 
 
+class MuJoCoRuntimeError(PhysicsBackendError):
+    """Raised when MuJoCo simulation or state extraction fails."""
+
+
+class UnsupportedBackendOperationError(PhysicsBackendError):
+    """Raised when an operation is not supported in the current phase."""
+
+
 class UnknownRuntimeBodyError(PhysicsBackendError, KeyError):
     """Raised when a runtime body ID is not present in the loaded model."""
 
