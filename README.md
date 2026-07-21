@@ -97,6 +97,7 @@ physical_simulation/
 - Phase 2G5：Adaptive Failure Attribution and Reference Convergence。
 - Phase 2G6：Episode-Level Contact Metrics and Event Matching。
 - Phase 2G7：Primary-Impact Failure Attribution Integration。
+- Phase 2G8：Unified Batch Primary-Impact Evaluation Pipeline。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -282,6 +283,36 @@ Phase 2G5 只做诊断和报告，不自动修改 adaptive 配置，不做自动
 - `examples/20_mujoco_primary_impact_attribution.py`：运行 primary-impact attribution 示例，并导出 CSV、JSON 和 Markdown 报告到 `artifacts/contact_primary_attribution/`。
 
 primary-impact attribution 是当前 adaptive 碰撞精度诊断的首选路径。运行级 `attribute_adaptive_failure()` 仍保留用于长轨迹整体诊断，以及 primary episode 缺失或无法匹配时的 fallback。后续反弹不能覆盖首次冲击的评价；primary reference convergence 和 run-level reference convergence 是不同问题，必须分别报告。
+
+## Phase 2G8 当前能力
+
+已支持统一批量 primary-impact 评估管线：
+
+- `AdaptiveBatchCase`：声明 sphere-plane / sphere-sphere batch case，包括 macro timestep、总时长、MuJoCo contact solver 参数、sphere 参数、初始状态和 metadata。
+- `run_adaptive_primary_batch()`：统一执行 fixed coarse、fixed fine、adaptive、episode extraction、primary matching、selected reference convergence、primary attribution、summary 和 artifact export。
+- `ReferenceEvaluationStatus`：在 batch 层区分 `NOT_CHECKED`、`CONVERGED`、`NOT_CONVERGED` 和 `INVALID`，不会把未检查 reference 记为未收敛。
+- `ReferenceEvaluationMode`：支持 `ALL`、`SELECTED` 和 `NONE`；默认 selected 模式先用 fixed-fine 作为 provisional baseline，再确定性选择需要 finer / ultra-fine refinement 的 case。
+- `generate_sphere_plane_batch_cases()` / `generate_sphere_sphere_batch_cases()`：提供确定性 case generator，默认不运行完整笛卡尔积，避免示例过慢。
+- `make_smoke_adaptive_batch()`：生成 8 个快速 case，包含 sphere-plane 和 sphere-sphere，并至少选择 2 个 reference check。
+- `make_standard_adaptive_batch()`：生成约 40 个标准 case，覆盖高度、macro timestep、solref、半径、质量和 sphere-sphere 碰撞类型。
+- `AdaptiveBatchSummary`：报告明确分母的改善率、reference coverage、primary matched/unmatched、step ratio、step saving 和 primary metric errors。
+- `AdaptiveBatchGroupSummary`：按 scene type、macro timestep、solref、impact-speed range、sphere radius 和 sphere mass 分组统计。
+- `AccuracyCostPoint` 与 `find_nondominated_accuracy_cost_points()`：导出精度-成本点和 non-dominated case；组合 error 需要调用方显式提供权重。
+- `examples/21_mujoco_adaptive_primary_batch.py`：一条命令从 case generation 运行到 CSV / JSON / Markdown report。
+
+数据流：
+
+```text
+BatchCase
+-> coarse/fine/adaptive runs
+-> episode extraction
+-> provisional comparison
+-> selected convergence
+-> primary attribution
+-> grouped summary/report
+```
+
+Phase 2G8 只是 orchestration、aggregation 和 reporting，不自动修改 adaptive 参数，不改变 timestep policy，不修改 `solref/solimp`、`backend.step()` 或 MuJoCo contact solver。fixed-fine 只是 provisional baseline；只有经过 refinement 且 primary episode 收敛的结果才能称为 converged reference。改善率必须报告明确分母，分母只包含 reference checked and converged、primary matched、metric applicable、adaptive valid 的 case。
 
 ## 控制与外力接口
 
