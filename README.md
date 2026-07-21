@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估、显式候选驱动的自适应 MuJoCo 子步进 runner，以及 coarse/fine/adaptive 接触 benchmark 与失真诊断。关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估、显式候选驱动的自适应 MuJoCo 子步进 runner、coarse/fine/adaptive 接触 benchmark 与失真诊断，以及 fixed-fine reference convergence 和 adaptive failure attribution。关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -94,6 +94,7 @@ physical_simulation/
 - Phase 2G2：Solver Contact Timescale and Analytic Collision Prediction。
 - Phase 2G3：Adaptive MuJoCo Runner and Contact State Machine。
 - Phase 2G4：Adaptive Substepping Benchmark and Failure Diagnostics。
+- Phase 2G5：Adaptive Failure Attribution and Reference Convergence。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -233,6 +234,21 @@ Phase 2G3 不实现 Hertz 接触时间估计，不支持任意 geometry 自动�
 
 adaptive substepping 提高的是 MuJoCo soft-contact 的离散数值分辨率，不改变材料语义，也不自动改变 `solref/solimp`。fixed coarse 可能因为 timestep 过粗产生 `e > 1` 的非物理能量增益；这类结果会标记为 `NONPHYSICAL_REBOUND`，不会解释为高弹材料。benchmark 必须同时比较恢复系数误差、穿透误差、稳定性和 MuJoCo physics step 数；`wall_time_seconds` 只记录，不作为严格回归指标。
 
+## Phase 2G5 当前能力
+
+已支持自适应失败归因和 reference convergence：
+
+- `ReferenceConvergenceResult`：对 fixed-fine、finer、ultra-fine 三个 timestep refinement level 计算收敛状态。
+- `ReferenceMetricConvergence`：记录 `D1=|Q_h-Q_h/2|`、`D2=|Q_h/2-Q_h/4|`、difference ratio、绝对/相对容差和状态。
+- `AdaptiveDiagnosticTrace` 与 `AdaptiveContactEpisodeTrace`：记录 prediction lead、实际 contact 时间、contact episode、substep 分布、最大穿透发生时间、是否达到 substep 上限等结构化诊断。
+- `AdaptiveFailureAttribution`：用确定性优先级给出 `LATE_PREDICTION`、`SHORT_PREDICTION_LEAD`、`MAX_SUBSTEPS_LIMITED`、`EARLY_FINE_EXIT`、`MULTIPLE_CONTACT_EPISODES`、`REFERENCE_NOT_CONVERGED` 等原因。
+- `ImprovementOutcome`：区分 `IMPROVED`、`NOT_IMPROVED`、`BOTH_ACCEPTABLE`、`REFERENCE_UNRESOLVED` 和 `NOT_APPLICABLE`。
+- `examples/18_mujoco_adaptive_failure_attribution.py`：运行中等规模 benchmark，选择未改善和误差较大的 case，执行 convergence 检查并导出 attribution 报告。
+
+fixed-fine 是数值参考，不自动等于真实解。只有 reference convergence 为 `CONVERGED` 时，最细 refinement level 才可作为 converged reference；未收敛时仍可报告误差，但必须标记 `REFERENCE_NOT_CONVERGED`，不能把 adaptive 偏离 fixed-fine 自动解释为 adaptive 策略失败。
+
+Phase 2G5 只做诊断和报告，不自动修改 adaptive 配置，不做自动调参，不改变 `solref/solimp`，不修改 `backend.step()`，也不引入 Hertz、rollback 或新碰撞几何预测。
+
 ## 控制与外力接口
 
 MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
@@ -270,6 +286,7 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 - Hertz contact-time estimation
 - event-time rollback
 - automatic adaptive candidate generation
+- automatic adaptive tuning
 - automatic material-to-solver mapping
 - quantitative friction validation
 - joint
