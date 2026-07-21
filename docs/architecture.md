@@ -186,6 +186,23 @@ fixed-fine 只是 baseline reference，不自动等价于真实解。convergence
 
 adaptive 未改善并不直接等于 adaptive 失败。归因层会区分预测提前量不足、达到 substep 上限、时间分辨率不足、过早退出 fine mode、多次 contact episode、reference 未收敛和指标采样敏感等情况。Phase 2G5 只生成诊断和报告，不自动修改 adaptive runner 配置，不做优化器或材料参数反演。
 
+Phase 2G6 将 contact run 进一步分解到 episode level：
+
+```text
+SimulationStepResult per physics step
+-> ContactEpisodeSample
+-> RawContactInterval
+-> contact chatter merge
+-> ContactEpisodeMetrics
+-> episode matching
+-> primary-impact comparison
+-> episode-level reference convergence
+```
+
+法向约定在 episode 层固定：sphere-plane 使用 `plane -> sphere`，sphere-sphere 使用 `body_a -> body_b`；`normal_relative_velocity < 0` 表示接近，`> 0` 表示分离。短暂 contact 消失不一定是真实分离，segmentation 会结合 gap duration、gap steps 和 separation velocity 判断是否属于 contact chatter。真实分离后的再次碰撞会形成 `SECONDARY_IMPACT`，不会混入 `PRIMARY_IMPACT` 指标。
+
+Episode 0 / `PRIMARY_IMPACT` 是评估 adaptive 碰撞精度的主要对象。coarse/fine/adaptive 必须先匹配 episode，再比较 restitution、penetration、duration、impact speed 和 start time。运行级 reference 可能因为后续反弹数量不同而 unresolved，但 primary-impact reference 仍可能已经 timestep 收敛。episode segmentation 只属于诊断层，不修改 MuJoCo solver、不修改 adaptive state machine，也不自动调整 `solref/solimp`。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：
@@ -229,7 +246,7 @@ Sphere / plane or sphere / sphere state
 
 该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 本身不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`。
 
-Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。Phase 2G5 进一步检查 fixed-fine reference 是否 timestep 收敛，并对 adaptive 未改善 case 生成结构化 failure attribution。adaptive 的目标是接近收敛参考的接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成、自动调参或 robot/task policy。
+Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。Phase 2G5 进一步检查 fixed-fine reference 是否 timestep 收敛，并对 adaptive 未改善 case 生成结构化 failure attribution。Phase 2G6 将运行级结果拆成独立 contact episodes，并优先比较匹配后的 primary impact。adaptive 的目标是接近收敛参考的接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成、自动调参或 robot/task policy。
 
 fixed coarse 下出现 `e > 1` 被视为数值失真诊断，不视为材料具有额外能量。近似法向能量比 `eta_E = e^2` 只用于 sphere-plane 法向碰撞诊断，不声称代表任意三维碰撞的完整能量守恒分析。
 

@@ -188,6 +188,9 @@ class AdaptiveFailureReason(Enum):
     REFERENCE_NOT_CONVERGED = "reference_not_converged"
     METRIC_SAMPLING_SENSITIVITY = "metric_sampling_sensitivity"
     NONPHYSICAL_ADAPTIVE_RESULT = "nonphysical_adaptive_result"
+    EPISODE_MISMATCH = "episode_mismatch"
+    CONTACT_CHATTER = "contact_chatter"
+    PRIMARY_IMPACT_NOT_FOUND = "primary_impact_not_found"
     UNKNOWN = "unknown"
 
 

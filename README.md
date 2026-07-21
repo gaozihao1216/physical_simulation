@@ -95,6 +95,7 @@ physical_simulation/
 - Phase 2G3：Adaptive MuJoCo Runner and Contact State Machine。
 - Phase 2G4：Adaptive Substepping Benchmark and Failure Diagnostics。
 - Phase 2G5：Adaptive Failure Attribution and Reference Convergence。
+- Phase 2G6：Episode-Level Contact Metrics and Event Matching。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -248,6 +249,23 @@ adaptive substepping 提高的是 MuJoCo soft-contact 的离散数值分辨率�
 fixed-fine 是数值参考，不自动等于真实解。只有 reference convergence 为 `CONVERGED` 时，最细 refinement level 才可作为 converged reference；未收敛时仍可报告误差，但必须标记 `REFERENCE_NOT_CONVERGED`，不能把 adaptive 偏离 fixed-fine 自动解释为 adaptive 策略失败。
 
 Phase 2G5 只做诊断和报告，不自动修改 adaptive 配置，不做自动调参，不改变 `solref/solimp`，不修改 `backend.step()`，也不引入 Hertz、rollback 或新碰撞几何预测。
+
+## Phase 2G6 当前能力
+
+已支持 episode-level contact metrics 和 event matching：
+
+- `ContactEpisodeSample`：记录每个 physics step 的候选接触状态、penetration、法向相对速度、body 速度、substep 数和 adaptive state。
+- `RawContactInterval`：从 `active_contact=False -> True -> False` 提取原始连续接触区间；仿真结束时仍 active 的区间会标记 `ended_while_contact_active`。
+- `segment_contact_episodes()`：用 gap duration、gap steps 和 separation velocity 合并短暂 contact chatter，并输出独立 `ContactEpisodeMetrics`。
+- `ContactEpisodeKind`：区分 `PRIMARY_IMPACT`、`SECONDARY_IMPACT`、`RESTING_CONTACT`、`CONTACT_CHATTER` 和 `UNCLASSIFIED`。
+- `match_contact_episodes()`：按 candidate、kind、start time 和 impact speed 确定性匹配 coarse/fine/adaptive 的 episode。
+- `PrimaryImpactBenchmarkComparison`：优先比较 Episode 0 / `PRIMARY_IMPACT`，避免把后续反弹混入首次冲击指标。
+- `EpisodeReferenceConvergenceResult`：对 primary impact 执行 fine/finer/ultra-fine episode-level convergence，允许 primary impact 已收敛但 run-level 后续反弹仍 unresolved。
+- `examples/19_mujoco_contact_episode_analysis.py`：导出 `artifacts/contact_episodes/episodes.csv`、`matches.csv`、`comparisons.csv`、`diagnostics.json` 和 `report.md`。
+
+法向相对速度约定固定为：`normal_relative_velocity < 0` 表示沿接触法向接近，`> 0` 表示分离。sphere-plane 的法向为 `plane -> sphere`；sphere-sphere 的法向为 `body_a -> body_b`。episode restitution 使用该 episode 接触前/接触开始处的法向接近速度和接触结束后的首次法向分离速度，不跨越多个 episode。
+
+一次 simulation run 可以包含多个 contact episodes；运行级 restitution、maximum penetration 和 contact duration 可能混合多次碰撞。Phase 2G6 将 episode segmentation 作为数值诊断层，不修改 MuJoCo contact solver、不修改 adaptive timestep 决策，也不会自动调整 `solref/solimp`。
 
 ## 控制与外力接口
 
