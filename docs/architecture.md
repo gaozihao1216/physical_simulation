@@ -8,7 +8,7 @@
 
 当前 `GeometrySpec` 已支持 box、sphere、cylinder、capsule、wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 等参数化几何。`GeometrySpec` 中的尺寸是最终物理尺寸，不通过 `Transform.scale` 隐式改变质量、体积或惯量。
 
-MuJoCo 当前只直接编译 box、sphere、cylinder 和 capsule。wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 已作为 Physics IR 语义存在，并支持体积、序列化和 scale baking；后续需要通过 mesh / convex mesh fallback 或后端专用扩展接入真实仿真。
+MuJoCo 当前直接编译 box、sphere、cylinder 和 capsule。wedge/ramp、cone、frustum 和 regular prism 通过 deterministic convex mesh fallback 编译为 MJCF `<asset><mesh>` 与 `type="mesh"` geom，并已通过真实 MuJoCo 加载测试。ellipsoid 和 spherical cap 仍只作为 Physics IR 语义存在，后续需要曲面采样 mesh fallback 或后端专用扩展。
 
 ## Physics Authoring Layer
 

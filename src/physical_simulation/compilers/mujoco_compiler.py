@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from physical_simulation.compilers.errors import (
     UnsupportedAssetStructureError,
     UnsupportedPhysicsFeatureError,
 )
+from physical_simulation.compilers.mujoco_mesh import geometry_to_convex_mesh, supports_mujoco_mesh_fallback
 from physical_simulation.compilers.mujoco_types import MuJoCoCompilationResult
 from physical_simulation.runtime import make_runtime_body_id
 from physical_simulation.scene import AssetInstanceSpec, PhysicsSceneSpec
@@ -132,6 +134,8 @@ class MuJoCoCompiler:
             },
         )
         worldbody = ET.SubElement(root, "worldbody")
+        asset_element = ET.Element("asset")
+        mesh_assets: dict[str, str] = {}
 
         body_mapping: list[tuple[str, str]] = []
         geom_mapping: list[tuple[str, str]] = []
@@ -142,11 +146,15 @@ class MuJoCoCompiler:
                 scene=scene,
                 instance=instance,
                 worldbody=worldbody,
+                asset_element=asset_element,
+                mesh_assets=mesh_assets,
                 body_mapping=body_mapping,
                 geom_mapping=geom_mapping,
                 contact_pair_candidates=contact_pair_candidates,
             )
 
+        if len(asset_element):
+            root.insert(2, asset_element)
         self._compile_contact_pairs(root, contact_pair_candidates)
         indent_xml(root)
         mjcf = ET.tostring(root, encoding="unicode", short_empty_elements=True)
@@ -163,6 +171,8 @@ class MuJoCoCompiler:
         scene: PhysicsSceneSpec,
         instance: AssetInstanceSpec,
         worldbody: ET.Element,
+        asset_element: ET.Element,
+        mesh_assets: dict[str, str],
         body_mapping: list[tuple[str, str]],
         geom_mapping: list[tuple[str, str]],
         contact_pair_candidates: list[_ContactPairCandidate],
@@ -202,6 +212,8 @@ class MuJoCoCompiler:
                 body=body,
                 visual=visual,
                 body_element=body_element,
+                asset_element=asset_element,
+                mesh_assets=mesh_assets,
                 runtime_body_id=runtime_body_id,
             )
         for collider in body.colliders:
@@ -212,6 +224,8 @@ class MuJoCoCompiler:
                 collider=collider,
                 material_by_id=material_by_id,
                 body_element=body_element,
+                asset_element=asset_element,
+                mesh_assets=mesh_assets,
                 runtime_body_id=runtime_body_id,
                 geom_mapping=geom_mapping,
                 contact_pair_candidates=contact_pair_candidates,
@@ -248,25 +262,28 @@ class MuJoCoCompiler:
         body: RigidBodySpec,
         visual: VisualSpec,
         body_element: ET.Element,
+        asset_element: ET.Element,
+        mesh_assets: dict[str, str],
         runtime_body_id: str,
     ) -> None:
         if not visual.visible:
             return
-        geom_type, geom_size = geometry_to_mujoco(visual.geometry)
-        ET.SubElement(
-            body_element,
-            "geom",
-            {
+        geom_attributes = {
                 "name": make_mujoco_name("visual", f"{runtime_body_id}/{visual.visual_id}"),
-                "type": geom_type,
-                "size": format_vector(geom_size),
                 "pos": format_vector(visual.local_transform.position),
                 "quat": format_vector(_mujoco_quat(visual.local_transform.rotation)),
                 "contype": "0",
                 "conaffinity": "0",
                 "rgba": "0.7 0.7 0.7 1",
-            },
+        }
+        geom_attributes.update(
+            self._geometry_geom_attributes(
+                visual.geometry,
+                asset_element=asset_element,
+                mesh_assets=mesh_assets,
+            )
         )
+        ET.SubElement(body_element, "geom", geom_attributes)
 
     def _compile_collider(
         self,
@@ -277,6 +294,8 @@ class MuJoCoCompiler:
         collider: ColliderSpec,
         material_by_id: dict[str, PhysicsMaterialSpec],
         body_element: ET.Element,
+        asset_element: ET.Element,
+        mesh_assets: dict[str, str],
         runtime_body_id: str,
         geom_mapping: list[tuple[str, str]],
         contact_pair_candidates: list[_ContactPairCandidate],
@@ -291,7 +310,6 @@ class MuJoCoCompiler:
                 f"body_id={body.body_id!r}, collider_id={collider.collider_id!r}, "
                 f"material_id={collider.material_id!r}"
             )
-        geom_type, geom_size = geometry_to_mujoco(collider.geometry)
         geom_name = make_mujoco_name("collision", f"{runtime_body_id}/{collider.collider_id}")
         contype = _collision_group_to_contype(
             collider.collision_group,
@@ -305,13 +323,8 @@ class MuJoCoCompiler:
         )
         # MuJoCo friction is an approximation here: sliding uses dynamic_friction;
         # static_friction and restitution are retained in IR but not directly mapped.
-        ET.SubElement(
-            body_element,
-            "geom",
-            {
+        geom_attributes = {
                 "name": geom_name,
-                "type": geom_type,
-                "size": format_vector(geom_size),
                 "pos": format_vector(collider.local_transform.position),
                 "quat": format_vector(_mujoco_quat(collider.local_transform.rotation)),
                 "contype": str(contype),
@@ -323,8 +336,15 @@ class MuJoCoCompiler:
                         MUJOCO_ROLLING_FRICTION,
                     )
                 ),
-            },
+        }
+        geom_attributes.update(
+            self._geometry_geom_attributes(
+                collider.geometry,
+                asset_element=asset_element,
+                mesh_assets=mesh_assets,
+            )
         )
+        ET.SubElement(body_element, "geom", geom_attributes)
         geom_mapping.append((geom_name, runtime_body_id))
         contact_pair_candidates.append(
             _ContactPairCandidate(
@@ -336,6 +356,50 @@ class MuJoCoCompiler:
                 material=material,
             )
         )
+
+    def _geometry_geom_attributes(
+        self,
+        geometry: GeometrySpec,
+        *,
+        asset_element: ET.Element,
+        mesh_assets: dict[str, str],
+    ) -> dict[str, str]:
+        try:
+            geom_type, geom_size = geometry_to_mujoco(geometry)
+            return {"type": geom_type, "size": format_vector(geom_size)}
+        except UnsupportedPhysicsFeatureError:
+            if not supports_mujoco_mesh_fallback(geometry):
+                raise
+        mesh_name = self._ensure_mesh_asset(
+            geometry,
+            asset_element=asset_element,
+            mesh_assets=mesh_assets,
+        )
+        return {"type": "mesh", "mesh": mesh_name}
+
+    def _ensure_mesh_asset(
+        self,
+        geometry: GeometrySpec,
+        *,
+        asset_element: ET.Element,
+        mesh_assets: dict[str, str],
+    ) -> str:
+        key = json.dumps(geometry.to_dict(), sort_keys=True, separators=(",", ":"))
+        if key in mesh_assets:
+            return mesh_assets[key]
+        mesh = geometry_to_convex_mesh(geometry)
+        mesh_name = make_mujoco_name("mesh", key)
+        ET.SubElement(
+            asset_element,
+            "mesh",
+            {
+                "name": mesh_name,
+                "vertex": mesh.vertex_attribute(),
+                "face": mesh.face_attribute(),
+            },
+        )
+        mesh_assets[key] = mesh_name
+        return mesh_name
 
     def _compile_contact_pairs(
         self,
