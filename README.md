@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估，以及显式候选驱动的自适应 MuJoCo 子步进 runner。关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估、显式候选驱动的自适应 MuJoCo 子步进 runner，以及 coarse/fine/adaptive 接触 benchmark 与失真诊断。关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -93,6 +93,7 @@ physical_simulation/
 - Phase 2G1：Fixed Substepping Infrastructure。
 - Phase 2G2：Solver Contact Timescale and Analytic Collision Prediction。
 - Phase 2G3：Adaptive MuJoCo Runner and Contact State Machine。
+- Phase 2G4：Adaptive Substepping Benchmark and Failure Diagnostics。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -218,6 +219,20 @@ Phase 2G2 基于 MuJoCo `solref/solimp` 的 soft-constraint 时间尺度，不�
 
 Phase 2G3 不实现 Hertz 接触时间估计，不支持任意 geometry 自动预测，不做 rollback 或事件精确落点，不修改 `solref/solimp`，也不根据接触状态自动改变材料或 solver 参数。当前 sphere-plane candidate 的 active-contact 匹配以 sphere runtime body 为核心，适合受控标定场景；复杂多接触场景后续需要更精确的 geom/body pair 绑定。
 
+## Phase 2G4 当前能力
+
+已支持自适应子步进 benchmark 和失真诊断：
+
+- `BenchmarkMode`：统一运行 `FIXED_COARSE`、`FIXED_FINE` 和 `ADAPTIVE` 三种模式。
+- `BenchmarkValidity`：把结果分类为 `VALID`、`NONPHYSICAL_REBOUND`、`EXCESSIVE_PENETRATION`、`TIMEOUT` 或 `UNSTABLE`。
+- `ContactBenchmarkResult`：记录 timestep、总仿真时间、outcome、入射/反弹速度、恢复系数、最大穿透、最终状态、macro/physics step 数、wall time 和 adaptive 统计。
+- `BenchmarkComparison`：相对 fixed fine 计算 coarse/adaptive 的 restitution、penetration、rebound velocity 误差，以及 adaptive step ratio 和 saving。
+- `AdaptiveRunStatistics`：记录状态持续 macro steps、substep count 分布、最大 substep count、首次 approaching/contact 时间、prediction lead time 和 substepped macro-step 占比。
+- `export_benchmark_csv()`、`export_benchmark_json()`、`write_benchmark_markdown_report()`：导出表格、完整 JSON 数据集和 Markdown 报告。
+- `examples/17_mujoco_adaptive_benchmark.py`：运行默认 benchmark，并把结果导出到 `artifacts/contact_benchmark/`。
+
+adaptive substepping 提高的是 MuJoCo soft-contact 的离散数值分辨率，不改变材料语义，也不自动改变 `solref/solimp`。fixed coarse 可能因为 timestep 过粗产生 `e > 1` 的非物理能量增益；这类结果会标记为 `NONPHYSICAL_REBOUND`，不会解释为高弹材料。benchmark 必须同时比较恢复系数误差、穿透误差、稳定性和 MuJoCo physics step 数；`wall_time_seconds` 只记录，不作为严格回归指标。
+
 ## 控制与外力接口
 
 MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
@@ -255,6 +270,7 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 - Hertz contact-time estimation
 - event-time rollback
 - automatic adaptive candidate generation
+- automatic material-to-solver mapping
 - quantitative friction validation
 - joint
 - actuator

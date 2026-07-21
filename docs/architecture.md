@@ -156,6 +156,19 @@ SimulationStepResult
 
 多候选同时命中时，runner 选择 `actual_substep_timestep` 最小的候选；若相同则用 candidate id 稳定排序。adaptive runner 不从所有 geom 自动枚举候选，不做 Hertz 接触时间估计，不做 rollback 或事件精确落点，也不会自动修改 `solref/solimp`。
 
+Phase 2G4 在 Evaluation Layer 增加 benchmark 与失真诊断，不改变 Runtime Layer 的物理推进语义：
+
+```text
+Contact benchmark case
+-> FIXED_COARSE / FIXED_FINE / ADAPTIVE
+-> ContactBenchmarkResult
+-> BenchmarkValidity
+-> BenchmarkComparison against fixed fine
+-> CSV / JSON / Markdown report
+```
+
+`FIXED_COARSE` 使用 macro timestep，`FIXED_FINE` 使用配置的最细 fixed grid，`ADAPTIVE` 只在预测或接触窗口使用更细 substeps。benchmark 关注 fixed coarse 是否发生非物理 `e > 1`、最大穿透是否过大、adaptive 是否接近 fixed fine、以及 adaptive 的 `physics_step_count` 是否显著低于 fixed fine。`wall_time_seconds` 只作为环境相关的观测值，正式回归以 MuJoCo `physics_step_count` 为主。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：
@@ -199,7 +212,9 @@ Sphere / plane or sphere / sphere state
 
 该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 本身不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`。
 
-Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。adaptive 的目标是接近 fixed fine 的接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成或 robot/task policy。
+Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。adaptive 的目标是接近 fixed fine 的接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成或 robot/task policy。
+
+fixed coarse 下出现 `e > 1` 被视为数值失真诊断，不视为材料具有额外能量。近似法向能量比 `eta_E = e^2` 只用于 sphere-plane 法向碰撞诊断，不声称代表任意三维碰撞的完整能量守恒分析。
 
 ## Robot Task Layer
 
