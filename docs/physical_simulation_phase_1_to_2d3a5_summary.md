@@ -12,7 +12,8 @@ supplement: MuJoCo convex mesh fallback for selected parametric geometry
 supplement: full tensor inertia for wedge, frustum, and regular prism
 supplement: extended MassProperties with principal inertial frame
 supplement: free-body velocity and external force control API
-test result: 255 passed
+supplement: contact wrench aggregation and discrete impulse integration
+test result: 264 passed
 ```
 
 本文档围绕以下主线组织：
@@ -64,8 +65,7 @@ Physics IR
 - joint / articulation / actuator；
 - robot model、controller、gripper；
 - task framework 与 task success metrics；
-- public per-body / body-pair contact wrench aggregation；
-- contact impulse API；
+- MuJoCo internal per-contact impulse API；
 - GUI。
 
 ## 2. 总体架构
@@ -103,7 +103,7 @@ flowchart LR
 | `backends` | MuJoCo 模型加载、运行、状态读取、contact/wrench 读取 | `MuJoCoBackend` 依赖 |
 | `runtime` | 后端无关运行时快照数据结构 | 否 |
 | `evaluation` | 轨迹采样和 resting-contact 指标解释 | 否 |
-| `tests/helpers` | 测试局部 contact wrench 聚合、V 槽与偏心撞击场景 | 测试中依赖 |
+| `tests/helpers` | V 槽、偏心撞击场景和测试辅助函数 | 测试中依赖 |
 
 项目的重要设计原则是：Physics IR 和 runtime 数据结构不保存 MuJoCo numeric ID；具体物理后端只通过 compiler/backend 层接入。
 
@@ -1276,7 +1276,8 @@ $$
 - penetration 不一定严格为零；
 - `mj_contactForce()` 返回当前离散仿真状态中的约束力；
 - 接触力峰值依赖 timestep、接触参数和 solver；
-- 当前没有 contact impulse API；
+- 当前已有基于聚合 contact wrench 的离散冲量积分工具；
+- 当前没有 MuJoCo internal per-contact impulse 直接读数；
 - 当前没有 timestep convergence framework。
 
 冲量定义为：
@@ -1304,7 +1305,19 @@ $$
 =m(\mathbf v_1-\mathbf v_0)-m\mathbf g\Delta t
 $$
 
-但当前项目没有实现该 API。对总冲量，前后动量差通常比逐 contact force 积分更简单；如果未来要做每个 contact 的贡献归因，才需要更细粒度的 `ContactWrench` 时间积分。
+当前 `integrate_body_contact_impulse()` 对 `BodyContactWrench` 样本使用固定 timestep 的 rectangle-rule 近似：
+
+$$
+\mathbf J \approx \sum_k \mathbf F_k \Delta t
+$$
+
+角冲量同理：
+
+$$
+\mathbf H \approx \sum_k \boldsymbol\tau_k \Delta t
+$$
+
+这不是 MuJoCo 内部 impulse 的直接读数，而是基于已公开 contact wrench 的后处理积分。对整个刚体总冲量，前后动量差仍然是重要的交叉验证；如果未来要做每个 contact 的精细归因，需要进一步设计 per-contact impulse attribution。
 
 角动量更复杂：
 
@@ -1379,7 +1392,7 @@ backend.close()
 当前全量测试：
 
 ```text
-255 passed
+264 passed
 ```
 
 阶段测试数量记录：
@@ -1403,6 +1416,7 @@ backend.close()
 | Polyhedral/frustum full inertia | 240 |
 | Extended MassProperties inertial frame | 248 |
 | Control and external force API | 255 |
+| Contact aggregation and discrete impulse | 264 |
 
 测试类型包括：
 
@@ -1415,6 +1429,7 @@ backend.close()
 - wedge/ramp、frustum、regular prism full inertia tensor；
 - MassProperties full tensor/principal axes serialization and MuJoCo inertial quat；
 - free-body velocity, force, torque, and clear-applied-force controls；
+- contact wrench aggregation and discrete impulse integration；
 - compiler XML 测试；
 - MuJoCo optional dependency 测试；
 - MuJoCo 真实模型加载；
@@ -1461,8 +1476,9 @@ backend.close()
 | 多方向接触力 | 已验证 | 左右 ramp force |
 | 偏心 COM torque | 测试级验证 | `test_mujoco_offcenter_impact.py` |
 | 镜像转动方向 | 测试级验证 | `test_mujoco_mirrored_offcenter_impact.py` |
-| Contact impulse | 未实现 | 无 API |
-| public per-body wrench aggregation | 未实现 | 仅 tests/helpers |
+| BodyContactWrench / BodyPairContactWrench | 已实现并测试 | `test_contact_aggregation.py`, `test_mujoco_contact_aggregation.py` |
+| Discrete contact impulse integration | 已实现并测试 | `test_contact_aggregation.py`, `test_mujoco_contact_aggregation.py` |
+| MuJoCo internal per-contact impulse | 未实现 | 无直接读数 API |
 | Initial/free-body velocity API | 已实现 | `set_body_velocity()` |
 | `apply_force` / `apply_torque` | 已实现 | free dynamic body only |
 | Joint/Robot | 未实现 | 占位模块 |
@@ -1473,9 +1489,8 @@ backend.close()
 必须明确的限制如下：
 
 - 无 scene-level declarative `initial_linear_velocity` / `initial_angular_velocity` 字段；当前通过 backend `set_body_velocity(update_initial=True)` 设置；
-- 无 contact impulse API；
-- 无 public per-body contact wrench aggregation；
-- 无 public body-pair contact wrench aggregation；
+- 无 MuJoCo internal per-contact impulse 直接读数；
+- 当前 `BodyContactImpulse` 是基于固定 timestep 的 `BodyContactWrench` 样本积分近似；
 - 无 restitution mapping；
 - `static_friction` 尚未独立映射；
 - 无定量滑动摩擦验证；
@@ -1493,7 +1508,7 @@ backend.close()
 - wedge/ramp 和 regular prism 已有 polyhedral full tensor；frustum 已有连续解析 full tensor；
 - MuJoCo 编译器已为 wedge/ramp、cone、frustum 和 regular prism 提供 convex mesh fallback，但 ellipsoid 与 spherical cap 仍未接入；
 - MuJoCo 软约束接触力峰值具有 timestep 与 solver 参数依赖性；
-- V 槽和 COM torque aggregation 当前只是测试/示例局部计算，不是生产 API。
+- V 槽和 COM torque validation 仍是测试/示例局部评估逻辑，不是完整 task evaluation API。
 
 不要把 MuJoCo 底层可能支持的功能自动算作本项目已经提供的功能。
 
@@ -1535,9 +1550,10 @@ Robot interaction and task evaluation
 
 - `ContactPoint`：几何；
 - `ContactWrench`：单点约束作用；
-- future `BodyContactWrench`：按 body 聚合；
-- future `BodyPairContactWrench`：按 body pair 聚合；
-- future impulse API：时间积分或动量跳变解释。
+- `BodyContactWrench`：按 body 聚合；
+- `BodyPairContactWrench`：按 body pair 聚合；
+- `BodyContactImpulse`：固定 timestep contact wrench 积分；
+- future MuJoCo internal impulse API：用于逐 contact 直接读数或更精细归因。
 
 ## 25. 附录：核对过的关键文件
 
@@ -1559,6 +1575,7 @@ Robot interaction and task evaluation
 - `src/physical_simulation/runtime/body_state.py`
 - `src/physical_simulation/runtime/contact.py`
 - `src/physical_simulation/runtime/contact_wrench.py`
+- `src/physical_simulation/runtime/contact_aggregation.py`
 - `src/physical_simulation/runtime/step_result.py`
 - `src/physical_simulation/compilers/mujoco_compiler.py`
 - `src/physical_simulation/compilers/mujoco_types.py`
@@ -1579,6 +1596,7 @@ Robot interaction and task evaluation
 - `tests/unit/test_mujoco_compiler.py`
 - `tests/unit/test_mujoco_contact_mapping.py`
 - `tests/unit/test_mujoco_contact_wrench_mapping.py`
+- `tests/unit/test_contact_aggregation.py`
 - `tests/integration/test_mujoco_free_fall.py`
 - `tests/integration/test_mujoco_box_drop.py`
 - `tests/integration/test_mujoco_sphere_drop.py`
@@ -1590,6 +1608,7 @@ Robot interaction and task evaluation
 - `tests/integration/test_mujoco_multibody_contact_forces.py`
 - `tests/integration/test_mujoco_offcenter_impact.py`
 - `tests/integration/test_mujoco_mirrored_offcenter_impact.py`
+- `tests/integration/test_mujoco_contact_aggregation.py`
 - `tests/helpers/contact_wrench_math.py`
 - `tests/helpers/mujoco_contact_scenes.py`
 - `examples/10_mujoco_contact_wrench.py`

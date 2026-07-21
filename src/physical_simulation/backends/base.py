@@ -6,7 +6,14 @@ TODO: Extend type definitions alongside the Physics IR.
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from physical_simulation.runtime import ContactPoint, ContactWrench, RigidBodyState, SimulationStepResult
+from physical_simulation.runtime import (
+    BodyContactWrench,
+    BodyPairContactWrench,
+    ContactPoint,
+    ContactWrench,
+    RigidBodyState,
+    SimulationStepResult,
+)
 
 
 class PhysicsBackend(ABC):
@@ -39,6 +46,14 @@ class PhysicsBackend(ABC):
     @abstractmethod
     def get_contact_wrenches(self) -> tuple[ContactWrench, ...]:
         """Return current contact wrenches."""
+
+    @abstractmethod
+    def get_body_contact_wrenches(self) -> tuple[BodyContactWrench, ...]:
+        """Return current contact wrenches aggregated by body."""
+
+    @abstractmethod
+    def get_body_pair_contact_wrenches(self) -> tuple[BodyPairContactWrench, ...]:
+        """Return current contact wrenches aggregated by body pair."""
 
     @abstractmethod
     def apply_force(self, body_id: str, force: Any, point: Optional[Any] = None) -> None:

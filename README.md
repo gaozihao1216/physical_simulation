@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取，以及基础 drop/resting-contact 轨迹评估。冲量、关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分，以及基础 drop/resting-contact 轨迹评估。关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -130,9 +130,7 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 当前仍未支持：
 
-- 跨接触点聚合 API。
-- 关于刚体质心的 net contact torque。
-- time-integrated impulse / collision impulse。
+- MuJoCo 内部逐 contact impulse 直接读数。
 - 定量摩擦验证。
 - restitution mapping。
 - joints、robots、meshes、GUI 和完整 task framework。
@@ -155,7 +153,7 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 此前 box-ground 支撑测试虽然有多个 contact point，但宏观运动和接触力方向高度对称，接近一维支撑。Phase 2D3A.5 专门验证多方向接触、多个外部刚体共同作用，以及偏心接触导致的旋转响应。
 
-当前仍未新增公共聚合 API。关于刚体 COM 的 net force / net torque 只在测试和示例中局部计算，正式 `BodyContactWrench`、`BodyPairContactWrench` 和 impulse 仍留到后续阶段。
+当前已新增公共聚合 API：`BodyContactWrench`、`BodyPairContactWrench` 和 `BodyContactImpulse`。它们支持按 body 或 body pair 聚合合力、关于指定中心的合力矩，并用固定 timestep 对 body 聚合 wrench 做离散冲量积分。
 
 ## 控制与外力接口
 
@@ -185,7 +183,7 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 
 当前仍未支持：
 
-- contact impulse
+- MuJoCo internal per-contact impulse
 - restitution mapping
 - quantitative friction validation
 - joint

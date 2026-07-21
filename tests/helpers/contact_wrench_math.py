@@ -1,10 +1,16 @@
-"""Test-only contact wrench aggregation helpers."""
+"""Test contact wrench math helpers."""
 
 from __future__ import annotations
 
 import math
 
-from physical_simulation.runtime import ContactWrench
+from physical_simulation.runtime import (
+    ContactWrench,
+    aggregate_contact_wrenches_by_body,
+    force_on_body,
+    pure_contact_torque_on_body,
+    torque_about_center_from_wrench,
+)
 
 Vector3 = tuple[float, float, float]
 
@@ -45,58 +51,25 @@ def assert_finite_vector(vector: Vector3, *, name: str) -> None:
         raise AssertionError(f"{name} must be a finite Vector3; actual value={vector!r}")
 
 
-def force_on_body(wrench: ContactWrench, runtime_body_id: str) -> Vector3:
-    if wrench.contact.body_a == runtime_body_id:
-        return wrench.force_on_body_a_world
-    if wrench.contact.body_b == runtime_body_id:
-        return wrench.force_on_body_b_world
-    raise ValueError(
-        f"wrench does not involve runtime body; runtime_body_id={runtime_body_id!r}, "
-        f"body_a={wrench.contact.body_a!r}, body_b={wrench.contact.body_b!r}"
-    )
-
-
-def pure_contact_torque_on_body(wrench: ContactWrench, runtime_body_id: str) -> Vector3:
-    if wrench.contact.body_a == runtime_body_id:
-        return wrench.contact_torque_on_body_a_world
-    if wrench.contact.body_b == runtime_body_id:
-        return wrench.contact_torque_on_body_b_world
-    raise ValueError(
-        f"wrench does not involve runtime body; runtime_body_id={runtime_body_id!r}, "
-        f"body_a={wrench.contact.body_a!r}, body_b={wrench.contact.body_b!r}"
-    )
-
-
-def torque_about_center_from_wrench(
-    wrench: ContactWrench,
-    *,
-    runtime_body_id: str,
-    center_world: Vector3,
-) -> Vector3:
-    force = force_on_body(wrench, runtime_body_id)
-    pure_torque = pure_contact_torque_on_body(wrench, runtime_body_id)
-    lever = _subtract(wrench.contact.position, center_world)
-    return _add(pure_torque, cross(lever, force))
-
-
 def aggregate_wrenches_for_body(
     wrenches: tuple[ContactWrench, ...],
     *,
     runtime_body_id: str,
     center_world: Vector3,
 ) -> tuple[Vector3, Vector3]:
-    net_force = (0.0, 0.0, 0.0)
-    net_torque = (0.0, 0.0, 0.0)
-    for wrench in wrenches:
-        if runtime_body_id not in (wrench.contact.body_a, wrench.contact.body_b):
-            continue
-        net_force = _add(net_force, force_on_body(wrench, runtime_body_id))
-        net_torque = _add(
-            net_torque,
-            torque_about_center_from_wrench(
-                wrench,
-                runtime_body_id=runtime_body_id,
-                center_world=center_world,
-            ),
-        )
-    return net_force, net_torque
+    aggregate = aggregate_contact_wrenches_by_body(
+        tuple(wrench for wrench in wrenches if runtime_body_id in (wrench.contact.body_a, wrench.contact.body_b)),
+        {
+            runtime_body_id: center_world,
+            **{
+                other_body: center_world
+                for wrench in wrenches
+                for other_body in (wrench.contact.body_a, wrench.contact.body_b)
+                if other_body != runtime_body_id
+            },
+        },
+    )
+    for item in aggregate:
+        if item.body_id == runtime_body_id:
+            return item.net_force_world, item.net_torque_world
+    return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)

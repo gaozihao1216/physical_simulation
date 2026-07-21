@@ -17,7 +17,16 @@ from physical_simulation.backends.errors import (
     UnknownRuntimeGeomError,
 )
 from physical_simulation.compilers import MuJoCoCompilationResult, MuJoCoCompiler
-from physical_simulation.runtime import ContactPoint, ContactWrench, RigidBodyState, SimulationStepResult
+from physical_simulation.runtime import (
+    BodyContactWrench,
+    BodyPairContactWrench,
+    ContactPoint,
+    ContactWrench,
+    RigidBodyState,
+    SimulationStepResult,
+    aggregate_contact_wrenches_by_body,
+    aggregate_contact_wrenches_by_body_pair,
+)
 from physical_simulation.scene import PhysicsSceneSpec
 from physical_simulation.validation.asset_validator import _as_float_tuple, validate_physics_scene
 
@@ -388,6 +397,28 @@ class MuJoCoBackend(PhysicsBackend):
         """Return solver-produced contact wrenches for the current MuJoCo contacts."""
         self._require_loaded("get_contact_wrenches")
         return tuple(self._build_contact_wrench(mapped) for mapped in self._extract_mapped_contacts())
+
+    def get_body_contact_wrenches(self) -> tuple[BodyContactWrench, ...]:
+        """Return current contact wrenches aggregated by runtime body."""
+        self._require_loaded("get_body_contact_wrenches")
+        return aggregate_contact_wrenches_by_body(
+            self.get_contact_wrenches(),
+            self._current_body_centers(),
+        )
+
+    def get_body_pair_contact_wrenches(self) -> tuple[BodyPairContactWrench, ...]:
+        """Return current contact wrenches aggregated by stable runtime body pair."""
+        self._require_loaded("get_body_pair_contact_wrenches")
+        return aggregate_contact_wrenches_by_body_pair(
+            self.get_contact_wrenches(),
+            self._current_body_centers(),
+        )
+
+    def _current_body_centers(self) -> dict[str, Vector3]:
+        return {
+            runtime_body_id: self._float_tuple(self._data.xpos[mj_body_id], 3)
+            for runtime_body_id, mj_body_id in self._runtime_body_to_mj_body_id.items()
+        }
 
     def apply_force(self, body_id: str, force: Any, point: Optional[Any] = None) -> None:
         """Apply a world-space force to a free body for subsequent steps.

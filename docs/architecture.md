@@ -101,17 +101,18 @@ MjData.contact
 
 MuJoCo backend 内部用私有 mapped contact 同时保存 raw contact index、geom IDs、runtime body IDs 和公开 `ContactPoint`，`get_contacts()` 与 `get_contact_wrenches()` 复用同一提取路径。这样可以保证两者顺序一致，并避免从排序后的 `ContactPoint` 反向猜测原始 `data.contact`。
 
-Phase 2D3A.5 增加了更有区分度的验证场景，但不新增生产聚合 API：
+Phase 2D3A.5 增加了更有区分度的验证场景，并在后续补充了生产级 contact wrench 聚合 API：
 
 ```text
 ContactWrench sequence
--> test-local per-body aggregation
+-> per-body / body-pair aggregation
 -> net force
--> torque about COM
+-> torque about chosen center
+-> discrete impulse integration
 -> translational / rotational response validation
 ```
 
-当前关于 COM 的合力和合力矩只在测试与示例中局部计算。正式的 per-body / body-pair 聚合、冲量积分和公开分析 API 将在 Phase 2D3B 设计。
+`BodyContactWrench` 聚合某个 runtime body 受到的总接触力和关于指定中心的总力矩。`BodyPairContactWrench` 聚合一对 runtime bodies 之间交换的接触作用。`BodyContactImpulse` 使用固定 timestep 对 body 聚合 wrench 做离散积分。该冲量是 rectangle-rule 近似，不是 MuJoCo 内部逐 contact impulse 直接读数。
 
 Runtime control 已支持自由动态刚体的基础扰动接口：
 
@@ -135,7 +136,7 @@ MuJoCoBackend
 -> RestingContactMetrics
 ```
 
-Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`，但当前仍不进行冲量积分、跨接触点聚合或关于刚体质心的 net wrench 计算。
+Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`、`BodyContactWrench`、`BodyPairContactWrench` 和离散 `BodyContactImpulse`。
 
 `simulate_body_trajectory()` 会对已加载的 backend 调用 `reset()`，记录 reset 后样本，然后推进固定步数并记录目标 body 的 `RigidBodyState` 与当前 contacts。`evaluate_resting_contact()` 使用最后窗口内的速度、位置漂移和四元数角距离判断 `settled`。
 
@@ -145,4 +146,4 @@ Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，�
 
 当前仍未实现，后续会基于 Runtime Layer 提供的状态和控制接口构建。
 
-后续完整任务评估、失败分类、接触冲量分析、接触点聚合和机器人交互评估仍未实现。
+后续完整任务评估、失败分类、MuJoCo 内部 impulse 读取和机器人交互评估仍未实现。
