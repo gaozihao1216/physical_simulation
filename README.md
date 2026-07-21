@@ -191,6 +191,8 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 项目仍处于早期仿真基础设施阶段，尚未实现完整仿真功能。当前代码已经具备可验证的 Physics IR、场景表示、MJCF 编译、MuJoCo 运行基础、接触映射和基础轨迹评估能力。
 
+当前 `GeometrySpec` 已支持 box、sphere、cylinder、capsule、wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 等参数化语义。MuJoCo 直接编译暂只覆盖 box、sphere、cylinder 和 capsule；其余几何需要后续 mesh / convex mesh fallback。
+
 ## 开发原则
 
 - visual mesh 与 collision mesh 分离。

@@ -7,7 +7,9 @@ import math
 from physical_simulation.assets.geometry import (
     BoxGeometry,
     CapsuleGeometry,
+    ConeGeometry,
     CylinderGeometry,
+    EllipsoidGeometry,
     GeometrySpec,
     SphereGeometry,
 )
@@ -78,6 +80,48 @@ def compute_cylinder_inertia(mass: float, radius: float, height: float) -> tuple
     return (transverse, transverse, axial)
 
 
+def compute_cone_inertia(mass: float, radius: float, height: float) -> tuple[float, float, float]:
+    """Compute diagonal inertia for a solid cone aligned to the local Z axis.
+
+    The origin is at the cone center of mass, with Z along the cone axis.
+    """
+    m = _validate_mass(mass)
+    r = _finite_float(
+        radius,
+        field_name="radius",
+        minimum=0.0,
+        strict_minimum=True,
+        error_type=InvalidGeometryError,
+    )
+    h = _finite_float(
+        height,
+        field_name="height",
+        minimum=0.0,
+        strict_minimum=True,
+        error_type=InvalidGeometryError,
+    )
+    transverse = 3.0 / 80.0 * m * (4.0 * r**2 + h**2)
+    axial = 3.0 / 10.0 * m * r**2
+    return (transverse, transverse, axial)
+
+
+def compute_ellipsoid_inertia(mass: float, radii: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Compute diagonal inertia for a solid ellipsoid aligned to local axes."""
+    m = _validate_mass(mass)
+    rx, ry, rz = _as_float_tuple(
+        radii,
+        field_name="radii",
+        length=3,
+        strictly_positive=True,
+        error_type=InvalidGeometryError,
+    )
+    return (
+        m / 5.0 * (ry**2 + rz**2),
+        m / 5.0 * (rx**2 + rz**2),
+        m / 5.0 * (rx**2 + ry**2),
+    )
+
+
 def compute_capsule_inertia(mass: float, radius: float, length: float) -> tuple[float, float, float]:
     """Approximate diagonal inertia for a solid capsule aligned to local Z.
 
@@ -129,8 +173,13 @@ def compute_inertia(geometry: GeometrySpec, mass: float) -> tuple[float, float, 
         return compute_cylinder_inertia(mass, geometry.radius, geometry.height)
     if isinstance(geometry, CapsuleGeometry):
         return compute_capsule_inertia(mass, geometry.radius, geometry.length)
+    if isinstance(geometry, ConeGeometry):
+        return compute_cone_inertia(mass, geometry.radius, geometry.height)
+    if isinstance(geometry, EllipsoidGeometry):
+        return compute_ellipsoid_inertia(mass, geometry.radii)
     raise InvalidGeometryError(
-        "geometry must be BoxGeometry, SphereGeometry, CylinderGeometry, or CapsuleGeometry; "
+        "geometry inertia is only implemented for BoxGeometry, SphereGeometry, CylinderGeometry, "
+        "CapsuleGeometry, ConeGeometry, and EllipsoidGeometry; "
         f"actual value={geometry!r}"
     )
 

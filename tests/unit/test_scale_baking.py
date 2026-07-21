@@ -6,11 +6,17 @@ from physical_simulation.assets import (
     BoxGeometry,
     CapsuleGeometry,
     ColliderSpec,
+    ConeGeometry,
     CylinderGeometry,
+    EllipsoidGeometry,
+    FrustumGeometry,
+    RegularPrismGeometry,
+    SphericalCapGeometry,
     RigidBodySpec,
     SphereGeometry,
     Transform,
     VisualSpec,
+    WedgeGeometry,
     bake_scale_into_geometry,
     bake_transform_scale,
     create_box,
@@ -27,6 +33,12 @@ def test_box_non_uniform_scale() -> None:
     assert bake_scale_into_geometry(BoxGeometry((1.0, 2.0, 3.0)), (2.0, 3.0, 4.0)) == BoxGeometry(
         (2.0, 6.0, 12.0)
     )
+    assert bake_scale_into_geometry(WedgeGeometry((1.0, 2.0, 3.0)), (2.0, 3.0, 4.0)) == WedgeGeometry(
+        (2.0, 6.0, 12.0)
+    )
+    assert bake_scale_into_geometry(EllipsoidGeometry((1.0, 2.0, 3.0)), (2.0, 3.0, 4.0)) == EllipsoidGeometry(
+        (2.0, 6.0, 12.0)
+    )
 
 
 def test_sphere_uniform_scale_and_non_uniform_error() -> None:
@@ -39,12 +51,30 @@ def test_cylinder_radial_scale_rules() -> None:
     assert bake_scale_into_geometry(CylinderGeometry(0.5, 2.0), (2.0, 2.0, 3.0)) == CylinderGeometry(1.0, 6.0)
     with pytest.raises(ScaleBakingError, match="elliptical cylinder"):
         bake_scale_into_geometry(CylinderGeometry(0.5, 2.0), (2.0, 3.0, 1.0))
+    assert bake_scale_into_geometry(ConeGeometry(0.5, 2.0), (2.0, 2.0, 3.0)) == ConeGeometry(1.0, 6.0)
+    with pytest.raises(ScaleBakingError, match="elliptical cone"):
+        bake_scale_into_geometry(ConeGeometry(0.5, 2.0), (2.0, 3.0, 1.0))
+    assert bake_scale_into_geometry(FrustumGeometry(0.5, 0.25, 2.0), (2.0, 2.0, 3.0)) == FrustumGeometry(
+        1.0, 0.5, 6.0
+    )
+    with pytest.raises(ScaleBakingError, match="elliptical frustum"):
+        bake_scale_into_geometry(FrustumGeometry(0.5, 0.25, 2.0), (2.0, 3.0, 1.0))
+    assert bake_scale_into_geometry(RegularPrismGeometry(6, 0.5, 2.0), (2.0, 2.0, 3.0)) == RegularPrismGeometry(
+        6, 1.0, 6.0
+    )
+    with pytest.raises(ScaleBakingError, match="regular polygon"):
+        bake_scale_into_geometry(RegularPrismGeometry(6, 0.5, 2.0), (2.0, 3.0, 1.0))
 
 
 def test_capsule_requires_uniform_scale() -> None:
     assert bake_scale_into_geometry(CapsuleGeometry(0.5, 2.0), (2.0, 2.0, 2.0)) == CapsuleGeometry(1.0, 4.0)
     with pytest.raises(ScaleBakingError, match="uniform"):
         bake_scale_into_geometry(CapsuleGeometry(0.5, 2.0), (2.0, 2.0, 3.0))
+    assert bake_scale_into_geometry(SphericalCapGeometry(1.0, 0.25), (2.0, 2.0, 2.0)) == SphericalCapGeometry(
+        2.0, 0.5
+    )
+    with pytest.raises(ScaleBakingError, match="ellipsoidal cap"):
+        bake_scale_into_geometry(SphericalCapGeometry(1.0, 0.25), (2.0, 2.0, 3.0))
 
 
 def test_bake_transform_scale_keeps_pose_and_does_not_mutate_inputs() -> None:

@@ -97,13 +97,33 @@ def validate_geometry(geometry: Any) -> None:
     from physical_simulation.assets.geometry import (
         BoxGeometry,
         CapsuleGeometry,
+        ConeGeometry,
         CylinderGeometry,
+        EllipsoidGeometry,
+        FrustumGeometry,
+        RegularPrismGeometry,
+        SphericalCapGeometry,
         SphereGeometry,
+        WedgeGeometry,
     )
 
-    if not isinstance(geometry, (BoxGeometry, SphereGeometry, CylinderGeometry, CapsuleGeometry)):
+    if not isinstance(
+        geometry,
+        (
+            BoxGeometry,
+            SphereGeometry,
+            CylinderGeometry,
+            CapsuleGeometry,
+            WedgeGeometry,
+            ConeGeometry,
+            FrustumGeometry,
+            EllipsoidGeometry,
+            SphericalCapGeometry,
+            RegularPrismGeometry,
+        ),
+    ):
         raise InvalidGeometryError(
-            "geometry must be BoxGeometry, SphereGeometry, CylinderGeometry, or CapsuleGeometry; "
+            "geometry must be a supported analytic GeometrySpec; "
             f"actual type={type(geometry).__name__}, value={geometry!r}"
         )
 

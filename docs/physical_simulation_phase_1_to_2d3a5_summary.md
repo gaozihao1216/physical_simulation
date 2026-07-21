@@ -7,7 +7,8 @@
 ```text
 original summary baseline: 5194c51 Validate multidirectional contact wrenches
 supplement: compound inertia full tensor module
-test result: 208 passed
+supplement: expanded parametric GeometrySpec module
+test result: 218 passed
 ```
 
 本文档围绕以下主线组织：
@@ -142,8 +143,16 @@ runtime_body_id = "{instance_id}/{body_id}"
 - `SphereGeometry(radius)`：球半径；
 - `CylinderGeometry(radius, height)`：沿局部 Z 轴的圆柱，`height` 为完整高度；
 - `CapsuleGeometry(radius, length)`：沿局部 Z 轴的胶囊，`length` 是中间圆柱段的完整长度，不包含两端半球半径。
+- `WedgeGeometry(size)`：右三角棱柱 / ramp，`size=(x,y,z)` 表示外接长方体完整尺寸；
+- `ConeGeometry(radius, height)`：沿局部 Z 轴的实体圆锥；
+- `FrustumGeometry(bottom_radius, top_radius, height)`：沿局部 Z 轴的实体圆台；
+- `EllipsoidGeometry(radii)`：沿局部 X/Y/Z 轴的实体椭球；
+- `SphericalCapGeometry(radius, height)`：球半径为 `radius`、球冠高度为 `height` 的实体球冠；
+- `RegularPrismGeometry(sides, radius, height)`：正多边形棱柱，`radius` 是底面外接圆半径。
 
 所有几何对象都有 `volume()`，并可序列化为 `dict`。这些 geometry 表示最终物理尺寸，而不是“基础尺寸再乘 transform scale”。这也是后续 mass/inertia 不读取 `Transform.scale` 的基础。
+
+新增的 wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 首先是 Physics IR 语义对象。当前 MuJoCo compiler 仍只直接支持 box、sphere、cylinder 和 capsule；其他参数化几何进入 MuJoCo 时会明确抛出 unsupported feature，后续需要 mesh / convex mesh fallback。
 
 ### 4.2 visual 与 collider 分离
 
@@ -309,6 +318,12 @@ Transform.scale 不应隐式改变质量、体积或惯量。
 | Sphere | 只允许均匀缩放，否则会变成 ellipsoid |
 | Cylinder | X/Y 径向 scale 必须相同，Z scale 改变高度 |
 | Capsule | 当前只允许严格均匀缩放，以保持球帽语义 |
+| Wedge/Ramp | 允许非均匀缩放，分别乘以 x/y/z 外接尺寸 |
+| Cone | X/Y 径向 scale 必须相同，Z scale 改变高度 |
+| Frustum | X/Y 径向 scale 必须相同，Z scale 改变高度 |
+| Ellipsoid | 允许非均匀缩放，分别乘以 x/y/z 半径 |
+| SphericalCap | 只允许均匀缩放，否则会变成 ellipsoidal cap |
+| RegularPrism | X/Y scale 必须相同，以保持正多边形底面 |
 
 `bake_transform_scale()` 返回 baked geometry 和单位 scale transform。测试中已经回归验证：`Transform.scale` 不会直接进入几何质量计算；如果需要缩放物理尺寸，必须先 bake 到 geometry。
 
@@ -422,6 +437,8 @@ MuJoCo-safe name 使用 `make_mujoco_name(prefix, raw_id)` 生成，带 SHA-256 
 | `CapsuleGeometry(radius=r, length=L)` | `capsule` | `(r, L/2)` |
 
 MuJoCo 的 box、cylinder、capsule 使用 half extents / half length，因此编译器做了显式转换。
+新增的 wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 当前不伪装成 MuJoCo 原生 primitive；
+它们需要后续 mesh / convex mesh fallback 才能进入真实后端仿真。
 
 ### 8.3 body 类型与 fixed_base
 
@@ -1276,7 +1293,7 @@ backend.close()
 当前全量测试：
 
 ```text
-208 passed
+218 passed
 ```
 
 阶段测试数量记录：
@@ -1295,6 +1312,7 @@ backend.close()
 | Phase 2D3A | 187 |
 | Phase 2D3A.5 | 201 |
 | Compound inertia supplement | 208 |
+| Parametric geometry expansion | 218 |
 
 测试类型包括：
 
@@ -1302,6 +1320,7 @@ backend.close()
 - validation 与 serialization；
 - primitive inertia 与 scale baking；
 - compound inertia tensor、products of inertia 与 principal-axis decomposition；
+- expanded parametric GeometrySpec volume、serialization、scale baking 与 MuJoCo unsupported boundary；
 - compiler XML 测试；
 - MuJoCo optional dependency 测试；
 - MuJoCo 真实模型加载；
@@ -1322,7 +1341,9 @@ backend.close()
 | 能力 | 当前状态 | 证据 |
 | --- | --- | --- |
 | Primitive Physics IR | 已实现并测试 | `test_geometry.py`, `test_builders.py` |
+| Expanded GeometrySpec | 已实现并测试 | `test_geometry.py`, `test_scale_baking.py` |
 | Box/Sphere/Cylinder/Capsule inertia | 已实现并测试 | `test_inertia.py` |
+| Cone/Ellipsoid inertia | 已实现并测试 | `test_inertia.py` |
 | Capsule 组合近似与平行轴 | 已测试 | `test_capsule_inertia_uses_volume_mass_split_and_parallel_axis` |
 | Compound inertia full tensor | 已实现并测试 | `test_compound_inertia.py` |
 | Scale baking | 已实现并测试 | `test_scale_baking.py` |
@@ -1372,6 +1393,8 @@ backend.close()
 - 无完整 task evaluation；
 - capsule inertia 是近似；
 - compound inertia 已能计算完整张量和主轴，但 production MJCF 编译路径尚未接入 principal-axis orientation；
+- wedge/ramp、frustum、spherical cap 和 regular prism 的解析惯量尚未实现；
+- MuJoCo 编译器尚未为新增参数化几何提供 mesh / convex mesh fallback；
 - MuJoCo 软约束接触力峰值具有 timestep 与 solver 参数依赖性；
 - V 槽和 COM torque aggregation 当前只是测试/示例局部计算，不是生产 API。
 

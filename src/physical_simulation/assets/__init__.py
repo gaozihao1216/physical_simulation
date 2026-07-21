@@ -11,9 +11,15 @@ from physical_simulation.assets.collider import ColliderSpec
 from physical_simulation.assets.geometry import (
     BoxGeometry,
     CapsuleGeometry,
+    ConeGeometry,
     CylinderGeometry,
+    EllipsoidGeometry,
+    FrustumGeometry,
     GeometrySpec,
+    RegularPrismGeometry,
+    SphericalCapGeometry,
     SphereGeometry,
+    WedgeGeometry,
     geometry_from_dict,
 )
 from physical_simulation.assets.mass_properties import MassProperties
@@ -38,6 +44,12 @@ __all__ = [
     "SphereGeometry",
     "CylinderGeometry",
     "CapsuleGeometry",
+    "WedgeGeometry",
+    "ConeGeometry",
+    "FrustumGeometry",
+    "EllipsoidGeometry",
+    "SphericalCapGeometry",
+    "RegularPrismGeometry",
     "GeometrySpec",
     "geometry_from_dict",
     "PhysicsMaterialSpec",

@@ -2,15 +2,18 @@ import math
 
 import pytest
 
-from physical_simulation.assets import BoxGeometry
+from physical_simulation.assets import BoxGeometry, ConeGeometry, EllipsoidGeometry, WedgeGeometry
 from physical_simulation.dynamics import (
     compute_box_inertia,
     compute_capsule_inertia,
+    compute_cone_inertia,
     compute_cylinder_inertia,
+    compute_ellipsoid_inertia,
+    compute_inertia,
     compute_mass_from_density,
     compute_sphere_inertia,
 )
-from physical_simulation.validation.errors import InvalidMassPropertiesError
+from physical_simulation.validation.errors import InvalidGeometryError, InvalidMassPropertiesError
 
 
 def test_box_inertia() -> None:
@@ -23,6 +26,14 @@ def test_sphere_inertia() -> None:
 
 def test_cylinder_inertia() -> None:
     assert compute_cylinder_inertia(12.0, 2.0, 3.0) == pytest.approx((21.0, 21.0, 24.0))
+
+
+def test_cone_inertia() -> None:
+    assert compute_cone_inertia(10.0, 2.0, 4.0) == pytest.approx((12.0, 12.0, 12.0))
+
+
+def test_ellipsoid_inertia() -> None:
+    assert compute_ellipsoid_inertia(10.0, (1.0, 2.0, 3.0)) == pytest.approx((26.0, 20.0, 10.0))
 
 
 def test_capsule_inertia_is_positive() -> None:
@@ -68,3 +79,13 @@ def test_invalid_mass_raises() -> None:
 
 def test_mass_from_density() -> None:
     assert compute_mass_from_density(BoxGeometry((2.0, 3.0, 4.0)), 10.0) == pytest.approx(240.0)
+
+
+def test_new_geometry_mass_from_density_uses_volume_without_transform_scale() -> None:
+    assert compute_mass_from_density(ConeGeometry(2.0, 3.0), 10.0) == pytest.approx(40.0 * math.pi)
+    assert compute_mass_from_density(EllipsoidGeometry((1.0, 2.0, 3.0)), 10.0) == pytest.approx(80.0 * math.pi)
+
+
+def test_inertia_for_complex_new_shapes_is_explicitly_unsupported() -> None:
+    with pytest.raises(InvalidGeometryError, match="inertia"):
+        compute_inertia(WedgeGeometry((1.0, 2.0, 3.0)), 1.0)

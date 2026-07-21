@@ -6,7 +6,9 @@
 
 负责承接上游重建几何，例如 GLB、mesh 或参数化 primitive。
 
-当前阶段只实现 box、sphere、cylinder、capsule 等参数化几何。`GeometrySpec` 中的尺寸是最终物理尺寸，不通过 `Transform.scale` 隐式改变质量、体积或惯量。
+当前 `GeometrySpec` 已支持 box、sphere、cylinder、capsule、wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 等参数化几何。`GeometrySpec` 中的尺寸是最终物理尺寸，不通过 `Transform.scale` 隐式改变质量、体积或惯量。
+
+MuJoCo 当前只直接编译 box、sphere、cylinder 和 capsule。wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 已作为 Physics IR 语义存在，并支持体积、序列化和 scale baking；后续需要通过 mesh / convex mesh fallback 或后端专用扩展接入真实仿真。
 
 ## Physics Authoring Layer
 

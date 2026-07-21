@@ -9,9 +9,15 @@ from __future__ import annotations
 from physical_simulation.assets.geometry import (
     BoxGeometry,
     CapsuleGeometry,
+    ConeGeometry,
     CylinderGeometry,
+    EllipsoidGeometry,
+    FrustumGeometry,
     GeometrySpec,
+    RegularPrismGeometry,
+    SphericalCapGeometry,
     SphereGeometry,
+    WedgeGeometry,
 )
 from physical_simulation.assets.transform import Transform
 from physical_simulation.validation.asset_validator import _as_float_tuple
@@ -56,9 +62,9 @@ def bake_scale_into_geometry(
 ) -> GeometrySpec:
     """Bake an explicit positive scale into supported analytic geometry.
 
-    Box supports arbitrary non-uniform positive scale. Sphere requires uniform
-    scale. Cylinder requires equal X/Y radial scale. Capsule follows the stricter
-    uniform-scale policy to avoid silently distorting spherical caps.
+    Box, wedge, and ellipsoid support arbitrary non-uniform positive scale.
+    Axisymmetric shapes require equal X/Y radial scale unless they explicitly
+    preserve spherical caps, in which case uniform scale is required.
     """
     sx, sy, sz = _as_float_tuple(
         scale,
@@ -72,6 +78,9 @@ def bake_scale_into_geometry(
     if isinstance(geometry, BoxGeometry):
         x, y, z = geometry.size
         return BoxGeometry(size=(x * sx, y * sy, z * sz))
+    if isinstance(geometry, WedgeGeometry):
+        x, y, z = geometry.size
+        return WedgeGeometry(size=(x * sx, y * sy, z * sz))
     if isinstance(geometry, SphereGeometry):
         if not (_close(sx, sy, tolerance) and _close(sx, sz, tolerance)):
             raise _scale_error(
@@ -96,8 +105,51 @@ def bake_scale_into_geometry(
                 "CapsuleGeometry only supports uniform scale in Phase 1.5 to preserve spherical caps exactly",
             )
         return CapsuleGeometry(radius=geometry.radius * sx, length=geometry.length * sx)
+    if isinstance(geometry, ConeGeometry):
+        if not _close(sx, sy, tolerance):
+            raise _scale_error(
+                geometry,
+                (sx, sy, sz),
+                "ConeGeometry requires equal X/Y scale; non-uniform radial scale would create an elliptical cone",
+            )
+        return ConeGeometry(radius=geometry.radius * sx, height=geometry.height * sz)
+    if isinstance(geometry, FrustumGeometry):
+        if not _close(sx, sy, tolerance):
+            raise _scale_error(
+                geometry,
+                (sx, sy, sz),
+                "FrustumGeometry requires equal X/Y scale; non-uniform radial scale would create an elliptical frustum",
+            )
+        return FrustumGeometry(
+            bottom_radius=geometry.bottom_radius * sx,
+            top_radius=geometry.top_radius * sx,
+            height=geometry.height * sz,
+        )
+    if isinstance(geometry, EllipsoidGeometry):
+        rx, ry, rz = geometry.radii
+        return EllipsoidGeometry(radii=(rx * sx, ry * sy, rz * sz))
+    if isinstance(geometry, SphericalCapGeometry):
+        if not (_close(sx, sy, tolerance) and _close(sx, sz, tolerance)):
+            raise _scale_error(
+                geometry,
+                (sx, sy, sz),
+                "SphericalCapGeometry only supports uniform scale; non-uniform scale would create an ellipsoidal cap",
+            )
+        return SphericalCapGeometry(radius=geometry.radius * sx, height=geometry.height * sx)
+    if isinstance(geometry, RegularPrismGeometry):
+        if not _close(sx, sy, tolerance):
+            raise _scale_error(
+                geometry,
+                (sx, sy, sz),
+                "RegularPrismGeometry requires equal X/Y scale to preserve a regular polygon base",
+            )
+        return RegularPrismGeometry(
+            sides=geometry.sides,
+            radius=geometry.radius * sx,
+            height=geometry.height * sz,
+        )
     raise InvalidGeometryError(
-        "geometry must be BoxGeometry, SphereGeometry, CylinderGeometry, or CapsuleGeometry; "
+        "geometry must be a supported analytic GeometrySpec; "
         f"actual value={geometry!r}"
     )
 
