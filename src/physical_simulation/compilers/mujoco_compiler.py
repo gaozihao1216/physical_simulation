@@ -28,7 +28,7 @@ from physical_simulation.compilers.errors import (
 )
 from physical_simulation.collision.convex_mesh import geometry_to_convex_mesh, supports_mujoco_mesh_fallback
 from physical_simulation.compilers.mujoco_types import MuJoCoCompilationResult
-from physical_simulation.mujoco import MuJoCoContactSolverParams
+from physical_simulation.mujoco.contact_params import MuJoCoContactSolverParams
 from physical_simulation.runtime import make_runtime_body_id
 from physical_simulation.scene import AssetInstanceSpec, PhysicsSceneSpec
 from physical_simulation.utils import format_float, format_vector, indent_xml

@@ -90,6 +90,7 @@ physical_simulation/
 - Phase 2D3B：Contact Force Aggregation and Impulse。
 - Phase 2F1：MuJoCo Contact Solver Parameters and Restitution Calibration。
 - Phase 2F1.5：Restitution Measurement Robustness。
+- Phase 2G1：Fixed Substepping Infrastructure。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -176,6 +177,18 @@ MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义�
 
 接触持续步数不等于物理持续时间，需要乘以 timestep 才是 seconds。持续静止接触不是一次超长碰撞；恢复系数必须结合 outcome 使用。
 
+## Phase 2G1 当前能力
+
+已支持 MuJoCo 固定子步进基础设施：
+
+- `MuJoCoSubstepRunner`：包裹一个已加载的 `MuJoCoBackend`，一次外部 macro step 内执行固定数量的内部 `mj_step`。
+- `SubstepAdvanceResult`：记录 `macro_step_index`、累计 `physics_step_count`、`macro_timestep`、`substep_timestep`、`substep_count` 和宏步末端 `SimulationStepResult`。
+- 时间语义：`substep_timestep = macro_timestep / substep_count`，一次 runner step 推进的总物理时间仍等于 `macro_timestep`。
+- 计数语义：runner 维护外部 `macro_step_index` 和自身累计 `physics_step_count`；`SimulationStepResult.step_index` 继续表示 backend 实际 MuJoCo physics step 计数。
+- `substep_callback`：默认关闭；需要精细标定时可在每个内部 substep 后观察 `SimulationStepResult`。
+
+本阶段只是后续自适应碰撞 timestep 的基础设施，`substep_count` 仍需显式指定。缩小 timestep 只提高当前 MuJoCo soft-contact 模型的数值分辨率；不会自动改变 `solref/solimp`，也不会自动把软接触变成硬碰撞。
+
 ## 控制与外力接口
 
 MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
@@ -209,6 +222,8 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 - parameter optimization
 - material parameter inversion
 - initial velocity API
+- adaptive substep selection
+- collision prediction / Hertz contact-time estimation
 - quantitative friction validation
 - joint
 - actuator

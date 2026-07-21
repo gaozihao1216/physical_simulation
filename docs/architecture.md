@@ -127,6 +127,19 @@ clear_applied_forces
 
 这些接口只作用于有 freejoint 的 dynamic body。`apply_force(point=...)` 接收世界系施力点，并转换为关于当前 body COM 的等效力矩。它们用于推动、撞击、扰动稳定性和后续机器人任务验证；`step(action=...)` 仍未作为通用控制入口。
 
+Phase 2G1 增加了固定子步进 runner：
+
+```text
+MuJoCoBackend loaded with macro timestep
+-> MuJoCoSubstepRunner.step(substep_count=N)
+-> temporarily set model.opt.timestep = macro_timestep / N
+-> run N internal mj_step calls
+-> restore original model.opt.timestep
+-> return macro-end SimulationStepResult
+```
+
+`MuJoCoBackend.step()` 仍然保持一次调用等于一次 `mj_step`。子步进作为独立 runner 存在，runner 自己维护 `macro_step_index` 和累计 `physics_step_count`；`SimulationStepResult.step_index` 仍表示实际 MuJoCo physics step 计数。`substep_count` 当前由调用者显式指定，尚未由碰撞预测或 Hertz 接触时间估计自动决定。缩小 timestep 只提高 MuJoCo soft-contact 模型的数值分辨率，不自动修改 `solref/solimp`，也不会把软接触变成硬碰撞。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：

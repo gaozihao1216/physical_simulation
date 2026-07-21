@@ -7,7 +7,7 @@ from typing import Any
 
 from physical_simulation.assets.geometry import GeometrySpec, geometry_from_dict
 from physical_simulation.assets.transform import Transform
-from physical_simulation.mujoco import MuJoCoContactSolverParams
+from physical_simulation.mujoco.contact_params import MuJoCoContactSolverParams
 from physical_simulation.validation.asset_validator import (
     _non_empty_string,
     validate_geometry,
