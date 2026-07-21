@@ -89,6 +89,7 @@ physical_simulation/
 - Phase 2D3A.5：Multi-Directional Contact and Off-Center Impact Validation。
 - Phase 2D3B：Contact Force Aggregation and Impulse。
 - Phase 2F1：MuJoCo Contact Solver Parameters and Restitution Calibration。
+- Phase 2F1.5：Restitution Measurement Robustness。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -156,7 +157,7 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 当前已新增公共聚合 API：`BodyContactWrench`、`BodyPairContactWrench` 和 `BodyContactImpulse`。它们支持按 body 或 body pair 聚合合力、关于指定中心的合力矩，并用固定 timestep 对 body 聚合 wrench 做离散冲量积分。
 
-## Phase 2F1 当前能力
+## Phase 2F1 / 2F1.5 当前能力
 
 已支持 MuJoCo 专用接触 solver 参数，但它们不属于通用 `PhysicsMaterialSpec`：
 
@@ -165,9 +166,15 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 - dynamic contact：普通 dynamic-dynamic、dynamic-static、dynamic-fixed contact 仍使用 MuJoCo geom 参数和 MuJoCo 自身 priority/solmix 混合规则。
 - explicit fixed-fixed pair：由于 `<contact><pair>` 会覆盖 geom 参数，compiler 会为 pair 明确解析最终 `solref/solimp/margin/gap`；friction 仍使用本项目 explicit-pair policy，即两个 `dynamic_friction` 的几何平均。
 - `ReferenceRestitutionTarget`：后端无关的标定目标，只描述目标恢复系数和参考撞击速度，不参与 MJCF 编译。
-- `measure_restitution()`：标准 sphere-drop 测量入射速度、反弹速度、测得恢复系数、接触起止步、最大穿透深度。
+- `measure_restitution()`：标准 sphere-drop 测量入射速度、反弹速度、测得恢复系数、接触起止步、最大穿透深度、归一化穿透和 outcome。
+- `RestitutionOutcome.REBOUNDED`：脱离接触后出现明确上升速度，`measured_restitution = rebound_speed / impact_speed`，contact duration 有有限值。
+- `RestitutionOutcome.SETTLED_IN_CONTACT`：持续接触且速度窗口足够小，`measured_restitution = 0`，contact duration 为 `None`。
+- `RestitutionOutcome.TIMEOUT`：达到 `max_steps` 但既未反弹也未稳定，`measured_restitution = None`，不能解释为完全非弹性碰撞。
+- `measure_restitution_sweep()`：通过不同初始高度产生不同 impact speed，并按测得的 impact speed 排序返回。
 
 MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义软约束接触行为；当前项目不会把 `PhysicsMaterialSpec.restitution` 自动转换成 `solref/solimp`。峰值接触力、最大穿透和测得恢复系数都依赖 timestep 与 solver 参数。
+
+接触持续步数不等于物理持续时间，需要乘以 timestep 才是 seconds。持续静止接触不是一次超长碰撞；恢复系数必须结合 outcome 使用。
 
 ## 控制与外力接口
 
@@ -199,6 +206,9 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 
 - MuJoCo internal per-contact impulse
 - automatic restitution-to-solver-params mapping
+- parameter optimization
+- material parameter inversion
+- initial velocity API
 - quantitative friction validation
 - joint
 - actuator

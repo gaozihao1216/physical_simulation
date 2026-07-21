@@ -74,7 +74,7 @@ Visual geom 永远不进入 explicit pair。同一 runtime body 内部的多个 
 
 MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义软约束接触行为；`ReferenceRestitutionTarget` 只是标定目标，不直接参与 MJCF 编译，也不会自动从 `PhysicsMaterialSpec.restitution` 推导 solver 参数。
 
-dynamic contact 使用 geom 上的 `solref`、`solimp`、`margin`、`gap`、`priority` 和 `solmix`，由 MuJoCo 自身规则混合。explicit pair 使用 pair 自身参数，因此 compiler 必须解析最终 pair 参数：`condim=3`，friction 使用项目 explicit-pair policy，也就是两个材质 `dynamic_friction` 的几何平均；如果 collider 配置了 MuJoCo solver 参数，pair 会解析最终 `solref/solimp/margin/gap`，否则不显式写 `solref/solimp` 并使用 MuJoCo 默认。这个 explicit-pair friction policy 与 MuJoCo 默认 friction 混合规则是两回事。峰值接触力和测得恢复系数依赖 timestep 与 solver 参数。
+dynamic contact 使用 geom 上的 `solref`、`solimp`、`margin`、`gap`、`priority` 和 `solmix`，由 MuJoCo 自身规则混合。explicit pair 使用 pair 自身参数，因此 compiler 必须解析最终 pair 参数：`condim=3`，friction 使用项目 explicit-pair policy，也就是两个材质 `dynamic_friction` 的几何平均；如果 collider 配置了 MuJoCo solver 参数，pair 会解析最终 `solref/solimp/margin/gap`，否则不显式写 `solref/solimp` 并使用 MuJoCo 默认。这个 explicit-pair friction policy 与 MuJoCo 默认 friction 混合规则是两回事。峰值接触力、最大穿透、测得恢复系数和 timeout/settled 判断都依赖 timestep 与 solver 参数。
 
 ## Runtime Layer
 
@@ -138,7 +138,19 @@ MuJoCoBackend
 -> RestingContactMetrics
 ```
 
-Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`、`BodyContactWrench`、`BodyPairContactWrench` 和离散 `BodyContactImpulse`。Phase 2F1 增加了 `measure_restitution()`，通过标准 sphere-drop 测量接触前最后下降速度、接触结束后首次明确上升速度、最大穿透和接触持续步数，并计算 `rebound_speed / impact_speed` 作为观测到的恢复系数。
+Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`、`BodyContactWrench`、`BodyPairContactWrench` 和离散 `BodyContactImpulse`。Phase 2F1/2F1.5 增加了 `measure_restitution()`，通过标准 sphere-drop 测量接触前最后下降速度、脱离接触后首次明确上升速度、最大穿透、归一化穿透和接触持续时间，并计算 `rebound_speed / impact_speed` 作为观测到的恢复系数。
+
+恢复系数测量使用显式 outcome：
+
+```text
+free fall
+-> first effective contact
+-> detached upward motion: REBOUNDED
+-> continuous slow contact window: SETTLED_IN_CONTACT
+-> max_steps without either condition: TIMEOUT
+```
+
+`SETTLED_IN_CONTACT` 表示持续接触并趋于静止，`measured_restitution=0`，但 contact duration 为 `None`，因为静止支撑不是一次超长碰撞。`TIMEOUT` 表示测量未收敛，`measured_restitution=None`，不能解释为完全非弹性碰撞。接触持续步数和物理持续时间不同：`contact_duration_seconds = contact_duration_steps * timestep`。
 
 `simulate_body_trajectory()` 会对已加载的 backend 调用 `reset()`，记录 reset 后样本，然后推进固定步数并记录目标 body 的 `RigidBodyState` 与当前 contacts。`evaluate_resting_contact()` 使用最后窗口内的速度、位置漂移和四元数角距离判断 `settled`。
 

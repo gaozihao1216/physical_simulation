@@ -46,7 +46,7 @@ def main() -> None:
     timesteps = (1.0 / 240.0, 1.0 / 480.0)
     print(
         "solref,timestep,impact_speed,rebound_speed,measured_restitution,"
-        "maximum_penetration,contact_duration_steps"
+        "maximum_penetration,contact_duration_steps,outcome"
     )
     for solref in solrefs:
         for timestep in timesteps:
@@ -59,11 +59,16 @@ def main() -> None:
             print(
                 f"{solref},{timestep:.9f},"
                 f"{measurement.impact_speed:.6f},"
-                f"{measurement.rebound_speed:.6f},"
-                f"{measurement.measured_restitution:.6f},"
+                f"{_format_optional(measurement.rebound_speed)},"
+                f"{_format_optional(measurement.measured_restitution)},"
                 f"{measurement.maximum_penetration_depth:.6f},"
-                f"{measurement.contact_duration_steps}"
+                f"{measurement.contact_duration_steps},"
+                f"{measurement.outcome.value}"
             )
+
+
+def _format_optional(value: float | None) -> str:
+    return "None" if value is None else f"{value:.6f}"
 
 
 if __name__ == "__main__":
