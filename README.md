@@ -91,6 +91,7 @@ physical_simulation/
 - Phase 2F1：MuJoCo Contact Solver Parameters and Restitution Calibration。
 - Phase 2F1.5：Restitution Measurement Robustness。
 - Phase 2G1：Fixed Substepping Infrastructure。
+- Phase 2G2：Solver Contact Timescale and Analytic Collision Prediction。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -189,6 +190,19 @@ MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义�
 
 本阶段只是后续自适应碰撞 timestep 的基础设施，`substep_count` 仍需显式指定。缩小 timestep 只提高当前 MuJoCo soft-contact 模型的数值分辨率；不会自动改变 `solref/solimp`，也不会自动把软接触变成硬碰撞。
 
+## Phase 2G2 当前能力
+
+已支持 MuJoCo solver 时间尺度估计和简单解析碰撞预测：
+
+- `estimate_solver_contact_timescale()`：从 `MuJoCoContactSolverParams.solref/solimp` 估计 soft-constraint 数值时间尺度。
+- `DampingRegime`：区分 `UNDERDAMPED`、`CRITICAL` 和 `OVERDAMPED`。
+- `recommend_solver_substeps()`：根据 characteristic timescale、macro timestep 和配置推荐固定 `substep_count`。
+- `AnalyticPlane` 与 `predict_sphere_plane_collision()`：恒速度 sphere-plane 首次接触预测。
+- `predict_sphere_sphere_collision()`：恒速度 sphere-sphere 首次接触预测。
+- `SolverCollisionEstimate`：组合 collision prediction、solver timescale 和 substep recommendation。
+
+Phase 2G2 基于 MuJoCo `solref/solimp` 的 soft-constraint 时间尺度，不是 Hertz 接触模型。它只给出推荐，不会自动调用 `MuJoCoSubstepRunner`，不会修改 timestep，不会修改 `solref/solimp`。完整 adaptive runner 留到 Phase 2G3。
+
 ## 控制与外力接口
 
 MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
@@ -223,7 +237,8 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 - material parameter inversion
 - initial velocity API
 - adaptive substep selection
-- collision prediction / Hertz contact-time estimation
+- general geometry collision prediction
+- Hertz contact-time estimation
 - quantitative friction validation
 - joint
 - actuator

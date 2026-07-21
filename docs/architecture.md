@@ -167,6 +167,22 @@ free fall
 
 `simulate_body_trajectory()` 会对已加载的 backend 调用 `reset()`，记录 reset 后样本，然后推进固定步数并记录目标 body 的 `RigidBodyState` 与当前 contacts。`evaluate_resting_contact()` 使用最后窗口内的速度、位置漂移和四元数角距离判断 `settled`。
 
+Phase 2G2 增加了 solver contact timescale 和解析碰撞预测：
+
+```text
+MuJoCoContactSolverParams
+-> estimate_solver_contact_timescale()
+-> SolverContactTimescale
+-> recommend_solver_substeps()
+-> SubstepRecommendation
+
+Sphere / plane or sphere / sphere state
+-> CollisionPrediction
+-> SolverCollisionEstimate
+```
+
+该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`；Phase 2G3 才会把预测和推荐接入 adaptive runner。
+
 ## Robot Task Layer
 
 负责机器人相关任务，例如下落、推动、稳定性、关节运动、抓取和夹爪控制。
