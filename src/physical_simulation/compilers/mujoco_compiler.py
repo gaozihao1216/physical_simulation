@@ -28,6 +28,7 @@ from physical_simulation.compilers.errors import (
 )
 from physical_simulation.collision.convex_mesh import geometry_to_convex_mesh, supports_mujoco_mesh_fallback
 from physical_simulation.compilers.mujoco_types import MuJoCoCompilationResult
+from physical_simulation.mujoco import MuJoCoContactSolverParams
 from physical_simulation.runtime import make_runtime_body_id
 from physical_simulation.scene import AssetInstanceSpec, PhysicsSceneSpec
 from physical_simulation.utils import format_float, format_vector, indent_xml
@@ -50,6 +51,7 @@ class _ContactPairCandidate:
     conaffinity: int
     has_dof: bool
     material: PhysicsMaterialSpec
+    contact_params: MuJoCoContactSolverParams | None
 
 
 def make_mujoco_name(prefix: str, raw_id: str) -> str:
@@ -336,6 +338,7 @@ class MuJoCoCompiler:
                     )
                 ),
         }
+        geom_attributes.update(self._mujoco_contact_param_attributes(collider.mujoco_contact_params))
         geom_attributes.update(
             self._geometry_geom_attributes(
                 collider.geometry,
@@ -353,8 +356,24 @@ class MuJoCoCompiler:
                 conaffinity=conaffinity,
                 has_dof=self._body_has_dof(body=body, instance=instance),
                 material=material,
+                contact_params=collider.mujoco_contact_params,
             )
         )
+
+    def _mujoco_contact_param_attributes(
+        self,
+        params: MuJoCoContactSolverParams | None,
+    ) -> dict[str, str]:
+        if params is None:
+            return {}
+        return {
+            "solref": format_vector(params.solref),
+            "solimp": format_vector(params.solimp),
+            "margin": format_float(params.margin),
+            "gap": format_float(params.gap),
+            "priority": str(params.priority),
+            "solmix": format_float(params.solmix),
+        }
 
     def _geometry_geom_attributes(
         self,
@@ -462,14 +481,85 @@ class MuJoCoCompiler:
         second: _ContactPairCandidate,
         key: tuple[str, str],
     ) -> dict[str, str]:
-        return {
+        attributes = {
             "geom1": key[0],
             "geom2": key[1],
             "condim": str(MUJOCO_EXPLICIT_PAIR_CONDIM),
             "friction": format_vector(self._mix_pair_friction(first.material, second.material)),
-            "margin": format_float(MUJOCO_EXPLICIT_PAIR_MARGIN),
-            "gap": format_float(MUJOCO_EXPLICIT_PAIR_GAP),
+            "margin": format_float(self._explicit_pair_margin(first.contact_params, second.contact_params)),
+            "gap": format_float(self._explicit_pair_gap(first.contact_params, second.contact_params)),
         }
+        solver_params = self._resolve_explicit_pair_solver_params(first.contact_params, second.contact_params)
+        if solver_params is not None:
+            attributes["solref"] = format_vector(solver_params.solref)
+            attributes["solimp"] = format_vector(solver_params.solimp)
+        return attributes
+
+    def _explicit_pair_margin(
+        self,
+        first: MuJoCoContactSolverParams | None,
+        second: MuJoCoContactSolverParams | None,
+    ) -> float:
+        return (first.margin if first is not None else MUJOCO_EXPLICIT_PAIR_MARGIN) + (
+            second.margin if second is not None else MUJOCO_EXPLICIT_PAIR_MARGIN
+        )
+
+    def _explicit_pair_gap(
+        self,
+        first: MuJoCoContactSolverParams | None,
+        second: MuJoCoContactSolverParams | None,
+    ) -> float:
+        return (first.gap if first is not None else MUJOCO_EXPLICIT_PAIR_GAP) + (
+            second.gap if second is not None else MUJOCO_EXPLICIT_PAIR_GAP
+        )
+
+    def _resolve_explicit_pair_solver_params(
+        self,
+        first: MuJoCoContactSolverParams | None,
+        second: MuJoCoContactSolverParams | None,
+    ) -> MuJoCoContactSolverParams | None:
+        if first is None and second is None:
+            return None
+        if first is None:
+            return second
+        if second is None:
+            return first
+        if first.priority > second.priority:
+            return first
+        if second.priority > first.priority:
+            return second
+        return MuJoCoContactSolverParams(
+            solref=self._mix_equal_priority_solref(first, second),
+            solimp=self._weighted_average(first.solimp, first.solmix, second.solimp, second.solmix),
+            margin=self._explicit_pair_margin(first, second),
+            gap=self._explicit_pair_gap(first, second),
+            priority=first.priority,
+            solmix=max(first.solmix, second.solmix),
+        )
+
+    def _mix_equal_priority_solref(
+        self,
+        first: MuJoCoContactSolverParams,
+        second: MuJoCoContactSolverParams,
+    ) -> tuple[float, float]:
+        if first.solref[0] <= 0.0 or second.solref[0] <= 0.0:
+            return tuple(min(first.solref[index], second.solref[index]) for index in range(2))  # type: ignore[return-value]
+        return self._weighted_average(first.solref, first.solmix, second.solref, second.solmix)
+
+    def _weighted_average(
+        self,
+        first_values: tuple[float, ...],
+        first_weight: float,
+        second_values: tuple[float, ...],
+        second_weight: float,
+    ) -> tuple[float, ...]:
+        weight_sum = first_weight + second_weight
+        if weight_sum == 0.0:
+            return tuple((first + second) * 0.5 for first, second in zip(first_values, second_values))
+        return tuple(
+            (first * first_weight + second * second_weight) / weight_sum
+            for first, second in zip(first_values, second_values)
+        )
 
     def _mix_pair_friction(
         self,

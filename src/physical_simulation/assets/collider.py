@@ -7,6 +7,7 @@ from typing import Any
 
 from physical_simulation.assets.geometry import GeometrySpec, geometry_from_dict
 from physical_simulation.assets.transform import Transform
+from physical_simulation.mujoco import MuJoCoContactSolverParams
 from physical_simulation.validation.asset_validator import (
     _non_empty_string,
     validate_geometry,
@@ -26,6 +27,7 @@ class ColliderSpec:
     collision_group: int = 1
     collision_mask: int = -1
     enabled: bool = True
+    mujoco_contact_params: MuJoCoContactSolverParams | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -66,10 +68,18 @@ class ColliderSpec:
             )
         if not isinstance(self.enabled, bool):
             raise PhysicsValidationError(f"enabled must be bool; actual value={self.enabled!r}")
+        if self.mujoco_contact_params is not None and not isinstance(
+            self.mujoco_contact_params,
+            MuJoCoContactSolverParams,
+        ):
+            raise PhysicsValidationError(
+                "mujoco_contact_params must be MuJoCoContactSolverParams or None; "
+                f"actual value={self.mujoco_contact_params!r}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the collider specification to a JSON-compatible dictionary."""
-        return {
+        data = {
             "collider_id": self.collider_id,
             "geometry": self.geometry.to_dict(),
             "local_transform": self.local_transform.to_dict(),
@@ -78,12 +88,16 @@ class ColliderSpec:
             "collision_mask": self.collision_mask,
             "enabled": self.enabled,
         }
+        if self.mujoco_contact_params is not None:
+            data["mujoco_contact_params"] = self.mujoco_contact_params.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ColliderSpec":
         """Deserialize a collider specification from a dictionary."""
         if not isinstance(data, dict):
             raise PhysicsValidationError(f"collider data must be a dict; actual value={data!r}")
+        raw_mujoco_params = data.get("mujoco_contact_params")
         return cls(
             collider_id=data.get("collider_id"),
             geometry=geometry_from_dict(data.get("geometry")),
@@ -92,4 +106,9 @@ class ColliderSpec:
             collision_group=data.get("collision_group", 1),
             collision_mask=data.get("collision_mask", -1),
             enabled=data.get("enabled", True),
+            mujoco_contact_params=(
+                None
+                if raw_mujoco_params is None
+                else MuJoCoContactSolverParams.from_dict(raw_mujoco_params)
+            ),
         )

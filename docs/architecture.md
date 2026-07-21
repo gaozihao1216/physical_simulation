@@ -12,9 +12,9 @@ MuJoCo 当前直接编译 box、sphere、cylinder 和 capsule。wedge/ramp、con
 
 ## Physics Authoring Layer
 
-负责人工或自动补充物理语义，包括 visual、collider、material、mass properties、rigid body、joint 和 actuator。
+负责人工或自动补充物理语义，包括 visual、collider、material、mass properties、rigid body、joint、actuator 和可选后端专用参数。
 
-当前支持 visual/collider 分离、基础材料、质量属性和单刚体资产。关节、执行器和 mesh collider 仍未实现。
+当前支持 visual/collider 分离、基础材料、质量属性、单刚体资产，以及 `ColliderSpec.mujoco_contact_params` 形式的 MuJoCo 专用接触 solver 参数。该参数不放入通用 `PhysicsMaterialSpec`，也不导入 MuJoCo Python 运行库。关节、执行器和 mesh collider 仍未实现。
 
 `dynamics.compound_inertia` 已支持由多个 primitive 组件计算组合刚体的总质量、整体质心、完整 3x3 惯量张量、主惯量和主轴方向。该计算会处理子组件旋转产生的非对角惯量项，并使用平行轴定理把各组件惯量平移到整体质心。`MassProperties` 已能保存 `inertia_tensor` 和 `principal_axes`；MuJoCo 编译路径会在主轴不与 body frame 对齐时输出 `<inertial quat="..." diaginertia="...">`。
 
@@ -72,7 +72,9 @@ both bodies have no DoF
 
 Visual geom 永远不进入 explicit pair。同一 runtime body 内部的多个 collider 永远不互相生成 pair。pair 使用 canonical geom-name key 去重并稳定排序。
 
-显式 pair 使用自身的 contact 参数：`condim=3`、`margin=0`、`gap=0`。friction 使用两个材质 `dynamic_friction` 的几何平均作为 sliding friction，并固定 torsional friction 为 `0.005`、rolling friction 为 `0.0001`。`static_friction` 和 `restitution` 暂未映射。`solref` / `solimp` 没有对应 Physics IR 参数，因此使用 MuJoCo 默认值。
+MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义软约束接触行为；`ReferenceRestitutionTarget` 只是标定目标，不直接参与 MJCF 编译，也不会自动从 `PhysicsMaterialSpec.restitution` 推导 solver 参数。
+
+dynamic contact 使用 geom 上的 `solref`、`solimp`、`margin`、`gap`、`priority` 和 `solmix`，由 MuJoCo 自身规则混合。explicit pair 使用 pair 自身参数，因此 compiler 必须解析最终 pair 参数：`condim=3`，friction 使用项目 explicit-pair policy，也就是两个材质 `dynamic_friction` 的几何平均；如果 collider 配置了 MuJoCo solver 参数，pair 会解析最终 `solref/solimp/margin/gap`，否则不显式写 `solref/solimp` 并使用 MuJoCo 默认。这个 explicit-pair friction policy 与 MuJoCo 默认 friction 混合规则是两回事。峰值接触力和测得恢复系数依赖 timestep 与 solver 参数。
 
 ## Runtime Layer
 
@@ -136,7 +138,7 @@ MuJoCoBackend
 -> RestingContactMetrics
 ```
 
-Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`、`BodyContactWrench`、`BodyPairContactWrench` 和离散 `BodyContactImpulse`。
+Backend 负责产生物理状态；Evaluation 只解释已经采样的轨迹，不修改 MuJoCo 状态、不启动 GUI、不做 wall-clock sleep，也不访问 MuJoCo 原生对象。Phase 2D3A 之后，Evaluation 可以读取 backend-independent `ContactWrench`、`BodyContactWrench`、`BodyPairContactWrench` 和离散 `BodyContactImpulse`。Phase 2F1 增加了 `measure_restitution()`，通过标准 sphere-drop 测量接触前最后下降速度、接触结束后首次明确上升速度、最大穿透和接触持续步数，并计算 `rebound_speed / impact_speed` 作为观测到的恢复系数。
 
 `simulate_body_trajectory()` 会对已加载的 backend 调用 `reset()`，记录 reset 后样本，然后推进固定步数并记录目标 body 的 `RigidBodyState` 与当前 contacts。`evaluate_resting_contact()` 使用最后窗口内的速度、位置漂移和四元数角距离判断 `settled`。
 

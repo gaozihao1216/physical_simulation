@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分，以及基础 drop/resting-contact 轨迹评估。关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置，以及基础 drop/resting-contact/restitution 标定评估。关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -87,7 +87,8 @@ physical_simulation/
 - Phase 2D2：Drop and Resting Contact Validation。
 - Phase 2D3A：MuJoCo Contact Wrench Extraction。
 - Phase 2D3A.5：Multi-Directional Contact and Off-Center Impact Validation。
-- Phase 2D3B：Contact Force Aggregation and Impulse（计划中）。
+- Phase 2D3B：Contact Force Aggregation and Impulse。
+- Phase 2F1：MuJoCo Contact Solver Parameters and Restitution Calibration。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -112,7 +113,7 @@ physical_simulation/
 
 Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标；单点接触力读取从 Phase 2D3A 开始提供。
 
-`static_friction` 和 `restitution` 当前暂未映射到 MJCF explicit pair。`solref` 和 `solimp` 没有对应 Physics IR 参数，因此不显式设置，使用 MuJoCo 默认值。
+`static_friction` 和 `restitution` 当前暂未映射到 MJCF explicit pair。未配置 MuJoCo solver 参数时，`solref` 和 `solimp` 不显式设置，使用 MuJoCo 默认值。
 
 ## Phase 2D3A 当前能力
 
@@ -132,7 +133,7 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 - MuJoCo 内部逐 contact impulse 直接读数。
 - 定量摩擦验证。
-- restitution mapping。
+- automatic restitution mapping。
 - joints、robots、meshes、GUI 和完整 task framework。
 
 `ContactPoint` 仍只描述接触几何，`normal_force` 与 `tangential_force` 在当前阶段保持为 `None`。`ContactWrench` 描述求解器在该接触点产生的作用力，不修改 `SimulationStepResult` 字段。
@@ -154,6 +155,19 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 此前 box-ground 支撑测试虽然有多个 contact point，但宏观运动和接触力方向高度对称，接近一维支撑。Phase 2D3A.5 专门验证多方向接触、多个外部刚体共同作用，以及偏心接触导致的旋转响应。
 
 当前已新增公共聚合 API：`BodyContactWrench`、`BodyPairContactWrench` 和 `BodyContactImpulse`。它们支持按 body 或 body pair 聚合合力、关于指定中心的合力矩，并用固定 timestep 对 body 聚合 wrench 做离散冲量积分。
+
+## Phase 2F1 当前能力
+
+已支持 MuJoCo 专用接触 solver 参数，但它们不属于通用 `PhysicsMaterialSpec`：
+
+- `MuJoCoContactSolverParams`：包含 `solref`、`solimp`、`margin`、`gap`、`priority` 和 `solmix`。
+- `ColliderSpec.mujoco_contact_params`：允许单个 collision geom 可选携带 MuJoCo 参数；visual geom 不携带该参数。
+- dynamic contact：普通 dynamic-dynamic、dynamic-static、dynamic-fixed contact 仍使用 MuJoCo geom 参数和 MuJoCo 自身 priority/solmix 混合规则。
+- explicit fixed-fixed pair：由于 `<contact><pair>` 会覆盖 geom 参数，compiler 会为 pair 明确解析最终 `solref/solimp/margin/gap`；friction 仍使用本项目 explicit-pair policy，即两个 `dynamic_friction` 的几何平均。
+- `ReferenceRestitutionTarget`：后端无关的标定目标，只描述目标恢复系数和参考撞击速度，不参与 MJCF 编译。
+- `measure_restitution()`：标准 sphere-drop 测量入射速度、反弹速度、测得恢复系数、接触起止步、最大穿透深度。
+
+MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义软约束接触行为；当前项目不会把 `PhysicsMaterialSpec.restitution` 自动转换成 `solref/solimp`。峰值接触力、最大穿透和测得恢复系数都依赖 timestep 与 solver 参数。
 
 ## 控制与外力接口
 
@@ -184,7 +198,7 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 当前仍未支持：
 
 - MuJoCo internal per-contact impulse
-- restitution mapping
+- automatic restitution-to-solver-params mapping
 - quantitative friction validation
 - joint
 - actuator

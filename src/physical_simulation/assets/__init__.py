@@ -37,6 +37,7 @@ from physical_simulation.assets.scale_baking import (
 )
 from physical_simulation.assets.transform import Transform
 from physical_simulation.assets.visual import VisualSpec
+from physical_simulation.mujoco import MuJoCoContactSolverParams
 
 __all__ = [
     "Transform",
@@ -57,6 +58,7 @@ __all__ = [
     "MassProperties",
     "VisualSpec",
     "ColliderSpec",
+    "MuJoCoContactSolverParams",
     "BodyType",
     "RigidBodySpec",
     "PhysicsAssetSpec",
