@@ -193,6 +193,8 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 当前 `GeometrySpec` 已支持 box、sphere、cylinder、capsule、wedge/ramp、cone、frustum、ellipsoid、spherical cap 和 regular prism 等参数化语义。MuJoCo 直接编译覆盖 box、sphere、cylinder 和 capsule；wedge/ramp、cone、frustum 和 regular prism 已支持 deterministic convex mesh fallback。ellipsoid 和 spherical cap 仍待曲面 mesh fallback 或后端专用表达。
 
+wedge/ramp、frustum 和 regular prism 已支持完整质量属性计算：wedge/ramp 与 regular prism 使用闭合多面体体积分解，frustum 使用连续圆台解析积分，结果包含完整 3x3 惯量张量、主惯量和主轴方向。
+
 ## 开发原则
 
 - visual mesh 与 collision mesh 分离。

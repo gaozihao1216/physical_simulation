@@ -26,7 +26,7 @@ from physical_simulation.compilers.errors import (
     UnsupportedAssetStructureError,
     UnsupportedPhysicsFeatureError,
 )
-from physical_simulation.compilers.mujoco_mesh import geometry_to_convex_mesh, supports_mujoco_mesh_fallback
+from physical_simulation.collision.convex_mesh import geometry_to_convex_mesh, supports_mujoco_mesh_fallback
 from physical_simulation.compilers.mujoco_types import MuJoCoCompilationResult
 from physical_simulation.runtime import make_runtime_body_id
 from physical_simulation.scene import AssetInstanceSpec, PhysicsSceneSpec

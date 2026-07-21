@@ -9,7 +9,8 @@ original summary baseline: 5194c51 Validate multidirectional contact wrenches
 supplement: compound inertia full tensor module
 supplement: expanded parametric GeometrySpec module
 supplement: MuJoCo convex mesh fallback for selected parametric geometry
-test result: 234 passed
+supplement: full tensor inertia for wedge, frustum, and regular prism
+test result: 240 passed
 ```
 
 本文档围绕以下主线组织：
@@ -301,6 +302,57 @@ $$
 
 当前限制是：MuJoCo 编译路径仍然消费既有 `MassProperties.inertia_diagonal` 视图；如果 principal axes 不与 body frame
 对齐，后续还需要把 principal frame orientation 显式接入 IR 和 MJCF `<inertial>`。
+
+### 4.6 多面体与圆台完整惯量张量
+
+后续补充的 `dynamics.polyhedral_inertia` 模块支持：
+
+- `WedgeGeometry`：通过闭合三角网格做体积分解；
+- `RegularPrismGeometry`：通过正多边形棱柱三角网格做体积分解；
+- `FrustumGeometry`：使用连续圆台解析积分，而不是 32 边 mesh 近似。
+
+多面体路径把每个闭合三角面与原点组成四面体，累积：
+
+```text
+signed tetra volume
+-> first moment
+-> second moment matrix
+-> inertia tensor about origin
+-> shift to center of mass
+-> principal-axis decomposition
+```
+
+四面体二阶矩使用解析积分。对原点、$\mathbf a,\mathbf b,\mathbf c$ 构成的四面体：
+
+$$
+\int \mathbf r\mathbf r^T dV
+=
+\frac{V}{20}
+\left[
+(\mathbf a+\mathbf b+\mathbf c)(\mathbf a+\mathbf b+\mathbf c)^T
++
+\mathbf a\mathbf a^T+\mathbf b\mathbf b^T+\mathbf c\mathbf c^T
+\right]
+$$
+
+由二阶矩 $\mathbf M=\int \rho\mathbf r\mathbf r^T dV$ 得到关于原点的惯量：
+
+$$
+\mathbf I_O=\operatorname{tr}(\mathbf M)\mathbf E-\mathbf M
+$$
+
+再从原点平移到整体质心 $\mathbf C$：
+
+$$
+\mathbf I_C
+=
+\mathbf I_O
+-
+m\left((\mathbf C^T\mathbf C)\mathbf E-\mathbf C\mathbf C^T\right)
+$$
+
+圆台路径直接按半径随高度线性变化的连续实体积分。若底半径为 $r_1$、顶半径为 $r_2$、高度为 $h$，
+质心会沿 Z 轴偏向半径较大一端；当 $r_1=r_2$ 时，测试验证其退化为 cylinder 的惯量和质心。
 
 ## 5. Scale Baking 与物理尺寸
 
@@ -1302,7 +1354,7 @@ backend.close()
 当前全量测试：
 
 ```text
-234 passed
+240 passed
 ```
 
 阶段测试数量记录：
@@ -1323,6 +1375,7 @@ backend.close()
 | Compound inertia supplement | 208 |
 | Parametric geometry expansion | 218 |
 | MuJoCo mesh fallback | 234 |
+| Polyhedral/frustum full inertia | 240 |
 
 测试类型包括：
 
@@ -1332,6 +1385,7 @@ backend.close()
 - compound inertia tensor、products of inertia 与 principal-axis decomposition；
 - expanded parametric GeometrySpec volume、serialization、scale baking 与 MuJoCo unsupported boundary；
 - deterministic convex mesh fallback 与真实 MuJoCo 加载；
+- wedge/ramp、frustum、regular prism full inertia tensor；
 - compiler XML 测试；
 - MuJoCo optional dependency 测试；
 - MuJoCo 真实模型加载；
@@ -1354,6 +1408,7 @@ backend.close()
 | Primitive Physics IR | 已实现并测试 | `test_geometry.py`, `test_builders.py` |
 | Expanded GeometrySpec | 已实现并测试 | `test_geometry.py`, `test_scale_baking.py` |
 | MuJoCo convex mesh fallback | 已实现并测试 | `test_mujoco_mesh_fallback.py`, `test_mujoco_mesh_fallback.py` integration |
+| Wedge/Frustum/RegularPrism full inertia | 已实现并测试 | `test_polyhedral_inertia.py` |
 | Box/Sphere/Cylinder/Capsule inertia | 已实现并测试 | `test_inertia.py` |
 | Cone/Ellipsoid inertia | 已实现并测试 | `test_inertia.py` |
 | Capsule 组合近似与平行轴 | 已测试 | `test_capsule_inertia_uses_volume_mass_split_and_parallel_axis` |
@@ -1405,7 +1460,8 @@ backend.close()
 - 无完整 task evaluation；
 - capsule inertia 是近似；
 - compound inertia 已能计算完整张量和主轴，但 production MJCF 编译路径尚未接入 principal-axis orientation；
-- wedge/ramp、frustum、spherical cap 和 regular prism 的解析惯量尚未实现；
+- spherical cap 的解析惯量尚未实现；
+- wedge/ramp 和 regular prism 已有 polyhedral full tensor；frustum 已有连续解析 full tensor，但 production MJCF 编译路径尚未接入 principal-axis orientation；
 - MuJoCo 编译器已为 wedge/ramp、cone、frustum 和 regular prism 提供 convex mesh fallback，但 ellipsoid 与 spherical cap 仍未接入；
 - MuJoCo 软约束接触力峰值具有 timestep 与 solver 参数依赖性；
 - V 槽和 COM torque aggregation 当前只是测试/示例局部计算，不是生产 API。
@@ -1466,6 +1522,8 @@ Robot interaction and task evaluation
 - `src/physical_simulation/assets/transform.py`
 - `src/physical_simulation/dynamics/inertia.py`
 - `src/physical_simulation/dynamics/compound_inertia.py`
+- `src/physical_simulation/dynamics/polyhedral_inertia.py`
+- `src/physical_simulation/collision/convex_mesh.py`
 - `src/physical_simulation/math/quaternion.py`
 - `src/physical_simulation/scene/asset_instance.py`
 - `src/physical_simulation/scene/physics_scene.py`
@@ -1485,6 +1543,7 @@ Robot interaction and task evaluation
 
 - `tests/unit/test_inertia.py`
 - `tests/unit/test_compound_inertia.py`
+- `tests/unit/test_polyhedral_inertia.py`
 - `tests/unit/test_scale_baking.py`
 - `tests/unit/test_transform_composition.py`
 - `tests/unit/test_mujoco_compiler.py`
