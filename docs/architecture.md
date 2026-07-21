@@ -138,7 +138,23 @@ MuJoCoBackend loaded with macro timestep
 -> return macro-end SimulationStepResult
 ```
 
-`MuJoCoBackend.step()` 仍然保持一次调用等于一次 `mj_step`。子步进作为独立 runner 存在，runner 自己维护 `macro_step_index` 和累计 `physics_step_count`；`SimulationStepResult.step_index` 仍表示实际 MuJoCo physics step 计数。`substep_count` 当前由调用者显式指定，尚未由碰撞预测或 Hertz 接触时间估计自动决定。缩小 timestep 只提高 MuJoCo soft-contact 模型的数值分辨率，不自动修改 `solref/solimp`，也不会把软接触变成硬碰撞。
+`MuJoCoBackend.step()` 仍然保持一次调用等于一次 `mj_step`。子步进作为独立 runner 存在，runner 自己维护 `macro_step_index` 和累计 `physics_step_count`；`SimulationStepResult.step_index` 仍表示实际 MuJoCo physics step 计数。缩小 timestep 只提高 MuJoCo soft-contact 模型的数值分辨率，不自动修改 `solref/solimp`，也不会把软接触变成硬碰撞。
+
+Phase 2G3 把显式碰撞候选、解析预测和 solver recommendation 接入 adaptive runner：
+
+```text
+SimulationStepResult
++ explicit adaptive candidates
+-> analytic prediction
+-> solver timescale estimate
+-> substep recommendation
+-> contact motion state machine
+-> MuJoCoSubstepRunner
+```
+
+`AdaptiveMuJoCoRunner` 当前支持调用者显式注册的 sphere-plane 与 sphere-sphere candidate。状态机使用 `FREE`、`APPROACHING`、`IMPACTING`、`RESTING` 和 `SEPARATING` 描述粗粒度接触阶段：普通自由运动使用 `substep_count=1`；预测到即将碰撞时进入 approaching 并使用 solver 推荐子步；active contact 阶段保持细子步；脱离接触后短暂保持 cached recommendation；持续接触且线速度、法向速度和角速度落入静止窗口后进入 resting，并恢复 macro timestep。
+
+多候选同时命中时，runner 选择 `actual_substep_timestep` 最小的候选；若相同则用 candidate id 稳定排序。adaptive runner 不从所有 geom 自动枚举候选，不做 Hertz 接触时间估计，不做 rollback 或事件精确落点，也不会自动修改 `solref/solimp`。
 
 ## Evaluation Layer
 
@@ -181,7 +197,9 @@ Sphere / plane or sphere / sphere state
 -> SolverCollisionEstimate
 ```
 
-该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`；Phase 2G3 才会把预测和推荐接入 adaptive runner。
+该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 本身不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`。
+
+Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。adaptive 的目标是接近 fixed fine 的接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成或 robot/task policy。
 
 ## Robot Task Layer
 

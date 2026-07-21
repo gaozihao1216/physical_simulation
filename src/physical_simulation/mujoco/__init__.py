@@ -20,12 +20,19 @@ from physical_simulation.mujoco.contact_timescale import (
 
 __all__ = [
     "AnalyticPlane",
+    "AdaptiveMuJoCoRunner",
+    "AdaptiveStepDecision",
+    "AdaptiveStepResult",
+    "AdaptiveSubstepConfig",
+    "ContactMotionState",
     "CollisionPrediction",
     "DampingRegime",
     "MuJoCoContactSolverParams",
     "MuJoCoSubstepRunner",
     "SolverCollisionEstimate",
     "SolverContactTimescale",
+    "SpherePlaneAdaptiveCandidate",
+    "SphereSphereAdaptiveCandidate",
     "SubstepAdvanceResult",
     "SubstepRecommendation",
     "SubstepRecommendationConfig",
@@ -44,6 +51,35 @@ def __getattr__(name: str):
         values = {
             "MuJoCoSubstepRunner": MuJoCoSubstepRunner,
             "SubstepAdvanceResult": SubstepAdvanceResult,
+        }
+        return values[name]
+    if name in {
+        "AdaptiveMuJoCoRunner",
+        "AdaptiveStepDecision",
+        "AdaptiveStepResult",
+        "AdaptiveSubstepConfig",
+        "ContactMotionState",
+        "SpherePlaneAdaptiveCandidate",
+        "SphereSphereAdaptiveCandidate",
+    }:
+        from physical_simulation.mujoco.adaptive import (
+            AdaptiveMuJoCoRunner,
+            AdaptiveStepDecision,
+            AdaptiveStepResult,
+            AdaptiveSubstepConfig,
+            ContactMotionState,
+            SpherePlaneAdaptiveCandidate,
+            SphereSphereAdaptiveCandidate,
+        )
+
+        values = {
+            "AdaptiveMuJoCoRunner": AdaptiveMuJoCoRunner,
+            "AdaptiveStepDecision": AdaptiveStepDecision,
+            "AdaptiveStepResult": AdaptiveStepResult,
+            "AdaptiveSubstepConfig": AdaptiveSubstepConfig,
+            "ContactMotionState": ContactMotionState,
+            "SpherePlaneAdaptiveCandidate": SpherePlaneAdaptiveCandidate,
+            "SphereSphereAdaptiveCandidate": SphereSphereAdaptiveCandidate,
         }
         return values[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

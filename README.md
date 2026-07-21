@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置，以及基础 drop/resting-contact/restitution 标定评估。关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估，以及显式候选驱动的自适应 MuJoCo 子步进 runner。关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -92,6 +92,7 @@ physical_simulation/
 - Phase 2F1.5：Restitution Measurement Robustness。
 - Phase 2G1：Fixed Substepping Infrastructure。
 - Phase 2G2：Solver Contact Timescale and Analytic Collision Prediction。
+- Phase 2G3：Adaptive MuJoCo Runner and Contact State Machine。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -201,7 +202,21 @@ MuJoCo 没有标准 per-geom `restitution` 字段。`solref` / `solimp` 定义�
 - `predict_sphere_sphere_collision()`：恒速度 sphere-sphere 首次接触预测。
 - `SolverCollisionEstimate`：组合 collision prediction、solver timescale 和 substep recommendation。
 
-Phase 2G2 基于 MuJoCo `solref/solimp` 的 soft-constraint 时间尺度，不是 Hertz 接触模型。它只给出推荐，不会自动调用 `MuJoCoSubstepRunner`，不会修改 timestep，不会修改 `solref/solimp`。完整 adaptive runner 留到 Phase 2G3。
+Phase 2G2 基于 MuJoCo `solref/solimp` 的 soft-constraint 时间尺度，不是 Hertz 接触模型。它只给出推荐，不会自动调用 `MuJoCoSubstepRunner`，不会修改 timestep，不会修改 `solref/solimp`。
+
+## Phase 2G3 当前能力
+
+已支持显式候选驱动的自适应 MuJoCo 子步进 runner：
+
+- `AdaptiveMuJoCoRunner`：包裹已加载的 `MuJoCoBackend`，并复用 `MuJoCoSubstepRunner` 执行内部子步。
+- `SpherePlaneAdaptiveCandidate` 与 `SphereSphereAdaptiveCandidate`：调用者显式声明需要预测的简单接触候选，不从任意 MJCF geom 自动枚举。
+- `ContactMotionState`：包含 `FREE`、`APPROACHING`、`IMPACTING`、`RESTING` 和 `SEPARATING`。
+- approaching/impacting/separating：根据解析预测、active contact 和缓存的 solver recommendation 使用更细 substeps。
+- resting/free：稳定接触或普通运动恢复为 `substep_count=1`，也就是使用 macro timestep。
+- 多候选选择：对所有命中的候选计算推荐，选择 `actual_substep_timestep` 最小者；相同 timestep 用 candidate id 稳定打破平局。
+- `AdaptiveStepDecision`：记录状态转移、候选 ID、prediction、solver estimate、substep 数、实际子步 timestep、是否观察到 contact 和决策原因。
+
+Phase 2G3 不实现 Hertz 接触时间估计，不支持任意 geometry 自动预测，不做 rollback 或事件精确落点，不修改 `solref/solimp`，也不根据接触状态自动改变材料或 solver 参数。当前 sphere-plane candidate 的 active-contact 匹配以 sphere runtime body 为核心，适合受控标定场景；复杂多接触场景后续需要更精确的 geom/body pair 绑定。
 
 ## 控制与外力接口
 
@@ -236,9 +251,10 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 - parameter optimization
 - material parameter inversion
 - initial velocity API
-- adaptive substep selection
 - general geometry collision prediction
 - Hertz contact-time estimation
+- event-time rollback
+- automatic adaptive candidate generation
 - quantitative friction validation
 - joint
 - actuator
