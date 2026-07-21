@@ -14,6 +14,8 @@
 
 当前支持 visual/collider 分离、基础材料、质量属性和单刚体资产。关节、执行器和 mesh collider 仍未实现。
 
+`dynamics.compound_inertia` 已支持由多个 primitive 组件计算组合刚体的总质量、整体质心、完整 3x3 惯量张量、主惯量和主轴方向。该计算会处理子组件旋转产生的非对角惯量项，并使用平行轴定理把各组件惯量平移到整体质心。当前 MuJoCo 编译路径仍主要消费既有 `MassProperties.inertia_diagonal` 视图；principal-axis orientation 接入 Physics IR 与 MJCF `<inertial>` 是后续工作。
+
 ## Physics IR Layer
 
 提供后端无关的中间表示：

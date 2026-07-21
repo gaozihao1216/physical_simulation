@@ -5,8 +5,9 @@
 当前最新状态：
 
 ```text
-latest commit: 5194c51 Validate multidirectional contact wrenches
-test result: 201 passed
+original summary baseline: 5194c51 Validate multidirectional contact wrenches
+supplement: compound inertia full tensor module
+test result: 208 passed
 ```
 
 本文档围绕以下主线组织：
@@ -218,6 +219,78 @@ I_{\mathrm{transverse}}
 $$
 
 这是一种清晰、可测试的 Phase 1 近似；后续如果要做高精度 capsule inertia，应替换为严格积分或可信参考公式。
+
+### 4.5 组合体完整惯量张量
+
+后续补充的 `dynamics.compound_inertia` 模块开始支持复杂组合体质量属性计算。它不再只返回
+`(I_x, I_y, I_z)`，而是先在 body-local frame 中构造完整对称惯量张量：
+
+$$
+\mathbf I =
+\begin{bmatrix}
+I_{xx} & I_{xy} & I_{xz}\\
+I_{xy} & I_{yy} & I_{yz}\\
+I_{xz} & I_{yz} & I_{zz}
+\end{bmatrix}
+$$
+
+对每个子组件，当前流程为：
+
+```text
+primitive geometry + mass + local Transform
+-> primitive local diagonal inertia
+-> rotate tensor into compound body frame
+-> shift tensor to compound COM with parallel-axis theorem
+-> sum full tensors
+-> symmetric eigen decomposition
+-> principal inertia + principal axes
+```
+
+整体质心：
+
+$$
+\mathbf C=\frac{\sum_i m_i \mathbf c_i}{\sum_i m_i}
+$$
+
+子组件局部惯量旋转到组合体坐标系：
+
+$$
+\mathbf I_i^{body}=\mathbf R_i \mathbf I_i^{local}\mathbf R_i^T
+$$
+
+平行轴定理：
+
+$$
+\mathbf I_i^{C}
+=
+\mathbf I_i^{body}
++
+m_i \left((\mathbf d_i^T\mathbf d_i)\mathbf E-\mathbf d_i\mathbf d_i^T\right)
+$$
+
+其中：
+
+$$
+\mathbf d_i=\mathbf c_i-\mathbf C
+$$
+
+总惯量张量：
+
+$$
+\mathbf I=\sum_i \mathbf I_i^C
+$$
+
+随后对对称矩阵做特征值分解：
+
+$$
+\mathbf I=\mathbf Q\operatorname{diag}(\lambda_1,\lambda_2,\lambda_3)\mathbf Q^T
+$$
+
+其中 `principal_inertia=(lambda_1, lambda_2, lambda_3)`，`principal_axes=Q`，主轴按列存储并做确定性符号规整。
+这能覆盖旋转子几何产生的 `I_xy/I_xz/I_yz` 非对角项，也能覆盖多组件相对整体质心偏移产生的平行轴贡献。
+
+当前限制是：MuJoCo 编译路径仍然消费既有 `MassProperties.inertia_diagonal` 视图；如果 principal axes 不与 body frame
+对齐，后续还需要把 principal frame orientation 显式接入 IR 和 MJCF `<inertial>`。
 
 ## 5. Scale Baking 与物理尺寸
 
@@ -1203,7 +1276,7 @@ backend.close()
 当前全量测试：
 
 ```text
-201 passed
+208 passed
 ```
 
 阶段测试数量记录：
@@ -1221,12 +1294,14 @@ backend.close()
 | Phase 2D2 | 161 |
 | Phase 2D3A | 187 |
 | Phase 2D3A.5 | 201 |
+| Compound inertia supplement | 208 |
 
 测试类型包括：
 
 - 纯数学单元测试；
 - validation 与 serialization；
 - primitive inertia 与 scale baking；
+- compound inertia tensor、products of inertia 与 principal-axis decomposition；
 - compiler XML 测试；
 - MuJoCo optional dependency 测试；
 - MuJoCo 真实模型加载；
@@ -1249,6 +1324,7 @@ backend.close()
 | Primitive Physics IR | 已实现并测试 | `test_geometry.py`, `test_builders.py` |
 | Box/Sphere/Cylinder/Capsule inertia | 已实现并测试 | `test_inertia.py` |
 | Capsule 组合近似与平行轴 | 已测试 | `test_capsule_inertia_uses_volume_mass_split_and_parallel_axis` |
+| Compound inertia full tensor | 已实现并测试 | `test_compound_inertia.py` |
 | Scale baking | 已实现并测试 | `test_scale_baking.py` |
 | 多实例场景 | 已验证 | `test_mujoco_multiple_instance_states.py` |
 | Transform composition | 已实现并测试 | `test_transform_composition.py` |
@@ -1295,6 +1371,7 @@ backend.close()
 - 无 GUI；
 - 无完整 task evaluation；
 - capsule inertia 是近似；
+- compound inertia 已能计算完整张量和主轴，但 production MJCF 编译路径尚未接入 principal-axis orientation；
 - MuJoCo 软约束接触力峰值具有 timestep 与 solver 参数依赖性；
 - V 槽和 COM torque aggregation 当前只是测试/示例局部计算，不是生产 API。
 
@@ -1353,6 +1430,7 @@ Robot interaction and task evaluation
 - `src/physical_simulation/assets/scale_baking.py`
 - `src/physical_simulation/assets/transform.py`
 - `src/physical_simulation/dynamics/inertia.py`
+- `src/physical_simulation/dynamics/compound_inertia.py`
 - `src/physical_simulation/math/quaternion.py`
 - `src/physical_simulation/scene/asset_instance.py`
 - `src/physical_simulation/scene/physics_scene.py`
@@ -1371,6 +1449,7 @@ Robot interaction and task evaluation
 测试与示例：
 
 - `tests/unit/test_inertia.py`
+- `tests/unit/test_compound_inertia.py`
 - `tests/unit/test_scale_baking.py`
 - `tests/unit/test_transform_composition.py`
 - `tests/unit/test_mujoco_compiler.py`
