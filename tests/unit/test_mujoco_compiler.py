@@ -6,6 +6,7 @@ import pytest
 from physical_simulation.assets import (
     BoxGeometry,
     ColliderSpec,
+    MassProperties,
     PhysicsMaterialSpec,
     RigidBodySpec,
     Transform,
@@ -144,6 +145,38 @@ def test_dynamic_inertial_values_and_no_geom_mass_density() -> None:
     for geom in _geoms(body_element):
         assert "mass" not in geom.attrib
         assert "density" not in geom.attrib
+
+
+def test_dynamic_inertial_includes_quat_for_non_identity_principal_axes() -> None:
+    half = math.sqrt(0.5)
+    mass_properties = MassProperties.from_principal_axes(
+        mass=2.0,
+        center_of_mass=(0.1, 0.2, 0.3),
+        principal_inertia=(1.0, 2.0, 3.0),
+        principal_axes=((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    )
+    body = RigidBodySpec(
+        "body",
+        "body",
+        "dynamic",
+        Transform.identity(),
+        (),
+        (ColliderSpec("collider", BoxGeometry((1.0, 1.0, 1.0))),),
+        mass_properties,
+    )
+    asset = create_single_body_asset(asset_id="asset", body=body)
+    scene = create_scene(scene_id="scene", instances=(AssetInstanceSpec("inst", asset),))
+
+    result, root = _root(scene)
+    body_element = _body_element(root, result.get_mujoco_body_name("inst/body"))
+    inertial = body_element.find("inertial")
+
+    assert inertial.attrib["mass"] == "2.0"
+    assert inertial.attrib["pos"] == "0.1 0.2 0.3"
+    assert inertial.attrib["diaginertia"] == "1.0 2.0 3.0"
+    assert tuple(float(value) for value in inertial.attrib["quat"].split()) == pytest.approx(
+        (half, 0.0, 0.0, half)
+    )
 
 
 def test_visual_and_collider_are_distinct_and_invisible_visual_is_skipped() -> None:

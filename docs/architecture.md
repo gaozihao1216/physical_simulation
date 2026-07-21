@@ -16,7 +16,7 @@ MuJoCo 当前直接编译 box、sphere、cylinder 和 capsule。wedge/ramp、con
 
 当前支持 visual/collider 分离、基础材料、质量属性和单刚体资产。关节、执行器和 mesh collider 仍未实现。
 
-`dynamics.compound_inertia` 已支持由多个 primitive 组件计算组合刚体的总质量、整体质心、完整 3x3 惯量张量、主惯量和主轴方向。该计算会处理子组件旋转产生的非对角惯量项，并使用平行轴定理把各组件惯量平移到整体质心。当前 MuJoCo 编译路径仍主要消费既有 `MassProperties.inertia_diagonal` 视图；principal-axis orientation 接入 Physics IR 与 MJCF `<inertial>` 是后续工作。
+`dynamics.compound_inertia` 已支持由多个 primitive 组件计算组合刚体的总质量、整体质心、完整 3x3 惯量张量、主惯量和主轴方向。该计算会处理子组件旋转产生的非对角惯量项，并使用平行轴定理把各组件惯量平移到整体质心。`MassProperties` 已能保存 `inertia_tensor` 和 `principal_axes`；MuJoCo 编译路径会在主轴不与 body frame 对齐时输出 `<inertial quat="..." diaginertia="...">`。
 
 `dynamics.polyhedral_inertia` 已支持 wedge/ramp 与 regular prism 的闭合三角网格体积分解，并支持 circular frustum 的连续解析积分。输出包含整体质心、完整惯量张量、主惯量和主轴方向。
 

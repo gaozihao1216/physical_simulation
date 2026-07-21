@@ -113,6 +113,8 @@ def test_compound_mass_properties_can_be_viewed_as_existing_mass_properties() ->
     assert mass_properties.mass == pytest.approx(result.mass)
     assert mass_properties.center_of_mass == pytest.approx(result.center_of_mass)
     assert mass_properties.inertia_diagonal == pytest.approx(result.principal_inertia)
+    assert mass_properties.inertia_tensor == result.inertia_tensor
+    assert mass_properties.principal_axes == result.principal_axes
 
 
 def test_component_rejects_unbaked_scale() -> None:

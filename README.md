@@ -195,6 +195,8 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 wedge/ramp、frustum 和 regular prism 已支持完整质量属性计算：wedge/ramp 与 regular prism 使用闭合多面体体积分解，frustum 使用连续圆台解析积分，结果包含完整 3x3 惯量张量、主惯量和主轴方向。
 
+`MassProperties` 已扩展为可保存 `inertia_tensor` 和 `principal_axes`。MuJoCo 编译器会在主轴不与 body frame 对齐时输出 `<inertial quat="..." diaginertia="...">`，从而让后端消费 principal inertial frame。
+
 ## 开发原则
 
 - visual mesh 与 collision mesh 分离。

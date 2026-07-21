@@ -9,6 +9,7 @@ mujoco = pytest.importorskip("mujoco")
 from physical_simulation.assets import (
     BoxGeometry,
     ColliderSpec,
+    MassProperties,
     PhysicsAssetSpec,
     RigidBodySpec,
     Transform,
@@ -87,6 +88,35 @@ def test_dynamic_mass_and_inertia_match_physics_ir() -> None:
     assert float(backend._model.body_mass[body_id]) == pytest.approx(box_body.mass_properties.mass)
     assert tuple(float(value) for value in backend._model.body_inertia[body_id]) == pytest.approx(
         box_body.mass_properties.inertia_diagonal
+    )
+
+
+def test_dynamic_principal_axes_orientation_loads_into_mujoco_inertial_frame() -> None:
+    half = math.sqrt(0.5)
+    mass_properties = MassProperties.from_principal_axes(
+        mass=2.0,
+        center_of_mass=(0.1, 0.2, 0.3),
+        principal_inertia=(1.0, 2.0, 3.0),
+        principal_axes=((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    )
+    body = RigidBodySpec(
+        "body",
+        "body",
+        "dynamic",
+        Transform.identity(),
+        (),
+        (ColliderSpec("collider", BoxGeometry((1.0, 1.0, 1.0))),),
+        mass_properties,
+    )
+    asset = create_single_body_asset(asset_id="asset", body=body)
+    scene = create_scene(scene_id="principal_axes", instances=(AssetInstanceSpec("inst", asset),))
+    backend = MuJoCoBackend()
+    backend.load_scene(scene)
+
+    body_id = backend._runtime_body_to_mj_body_id["inst/body"]
+    assert tuple(float(value) for value in backend._model.body_inertia[body_id]) == pytest.approx((1.0, 2.0, 3.0))
+    assert tuple(float(value) for value in backend._model.body_iquat[body_id]) == pytest.approx(
+        (half, 0.0, 0.0, half)
     )
 
 

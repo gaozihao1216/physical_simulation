@@ -245,15 +245,14 @@ class MuJoCoCompiler:
                 f"dynamic body requires MassProperties for inertial compilation; "
                 f"scene_id={scene.scene_id!r}, instance_id={instance.instance_id!r}, body_id={body.body_id!r}"
             )
-        ET.SubElement(
-            body_element,
-            "inertial",
-            {
-                "pos": format_vector(mass_properties.center_of_mass),
-                "mass": format_float(mass_properties.mass),
-                "diaginertia": format_vector(mass_properties.inertia_diagonal),
-            },
-        )
+        attributes = {
+            "pos": format_vector(mass_properties.center_of_mass),
+            "mass": format_float(mass_properties.mass),
+            "diaginertia": format_vector(mass_properties.inertia_diagonal),
+        }
+        if mass_properties.has_non_identity_principal_axes:
+            attributes["quat"] = format_vector(_mujoco_quat(mass_properties.inertial_frame_quaternion))
+        ET.SubElement(body_element, "inertial", attributes)
 
     def _compile_visual(
         self,

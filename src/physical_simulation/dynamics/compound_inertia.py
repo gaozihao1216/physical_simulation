@@ -72,6 +72,8 @@ class CompoundMassProperties:
             mass=self.mass,
             center_of_mass=self.center_of_mass,
             inertia_diagonal=self.principal_inertia,
+            inertia_tensor=self.inertia_tensor,
+            principal_axes=self.principal_axes,
         )
 
 

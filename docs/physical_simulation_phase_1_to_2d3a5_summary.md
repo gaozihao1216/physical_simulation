@@ -10,7 +10,8 @@ supplement: compound inertia full tensor module
 supplement: expanded parametric GeometrySpec module
 supplement: MuJoCo convex mesh fallback for selected parametric geometry
 supplement: full tensor inertia for wedge, frustum, and regular prism
-test result: 240 passed
+supplement: extended MassProperties with principal inertial frame
+test result: 248 passed
 ```
 
 本文档围绕以下主线组织：
@@ -167,7 +168,7 @@ visual geometry 只用于显示，不参与碰撞映射，不参与 MuJoCo conta
 
 ### 4.3 质量与惯量
 
-`MassProperties` 由 `mass`、`center_of_mass`、`inertia_diagonal` 构成。对 dynamic body，构建器可以通过显式 `mass` 或 `density` / `material.density` 生成质量和惯量；但 `mass` 与 `density` 互斥。
+`MassProperties` 由 `mass`、`center_of_mass`、`inertia_diagonal`、`inertia_tensor` 和 `principal_axes` 构成。对 dynamic body，构建器可以通过显式 `mass` 或 `density` / `material.density` 生成质量和惯量；但 `mass` 与 `density` 互斥。旧的三元构造仍然兼容，会被解释为 body frame 对齐的对角惯量和单位主轴。
 
 Box 惯量，设完整尺寸为 $(a,b,c)$、质量为 $m$：
 
@@ -300,8 +301,13 @@ $$
 其中 `principal_inertia=(lambda_1, lambda_2, lambda_3)`，`principal_axes=Q`，主轴按列存储并做确定性符号规整。
 这能覆盖旋转子几何产生的 `I_xy/I_xz/I_yz` 非对角项，也能覆盖多组件相对整体质心偏移产生的平行轴贡献。
 
-当前限制是：MuJoCo 编译路径仍然消费既有 `MassProperties.inertia_diagonal` 视图；如果 principal axes 不与 body frame
-对齐，后续还需要把 principal frame orientation 显式接入 IR 和 MJCF `<inertial>`。
+当前 `MassProperties` 已能保存完整 `inertia_tensor` 与 `principal_axes`。MuJoCo 编译路径会消费主惯量和主轴方向：
+
+```xml
+<inertial pos="..." mass="..." diaginertia="..." quat="..."/>
+```
+
+当 principal axes 与 body frame 对齐时，`quat` 可省略；当不对齐时，compiler 会写出 principal inertial frame orientation。
 
 ### 4.6 多面体与圆台完整惯量张量
 
@@ -1354,7 +1360,7 @@ backend.close()
 当前全量测试：
 
 ```text
-240 passed
+248 passed
 ```
 
 阶段测试数量记录：
@@ -1376,6 +1382,7 @@ backend.close()
 | Parametric geometry expansion | 218 |
 | MuJoCo mesh fallback | 234 |
 | Polyhedral/frustum full inertia | 240 |
+| Extended MassProperties inertial frame | 248 |
 
 测试类型包括：
 
@@ -1386,6 +1393,7 @@ backend.close()
 - expanded parametric GeometrySpec volume、serialization、scale baking 与 MuJoCo unsupported boundary；
 - deterministic convex mesh fallback 与真实 MuJoCo 加载；
 - wedge/ramp、frustum、regular prism full inertia tensor；
+- MassProperties full tensor/principal axes serialization and MuJoCo inertial quat；
 - compiler XML 测试；
 - MuJoCo optional dependency 测试；
 - MuJoCo 真实模型加载；
@@ -1409,6 +1417,7 @@ backend.close()
 | Expanded GeometrySpec | 已实现并测试 | `test_geometry.py`, `test_scale_baking.py` |
 | MuJoCo convex mesh fallback | 已实现并测试 | `test_mujoco_mesh_fallback.py`, `test_mujoco_mesh_fallback.py` integration |
 | Wedge/Frustum/RegularPrism full inertia | 已实现并测试 | `test_polyhedral_inertia.py` |
+| MassProperties principal frame | 已实现并测试 | `test_mass_properties.py`, `test_mujoco_model_loading.py` |
 | Box/Sphere/Cylinder/Capsule inertia | 已实现并测试 | `test_inertia.py` |
 | Cone/Ellipsoid inertia | 已实现并测试 | `test_inertia.py` |
 | Capsule 组合近似与平行轴 | 已测试 | `test_capsule_inertia_uses_volume_mass_split_and_parallel_axis` |
@@ -1459,9 +1468,9 @@ backend.close()
 - 无 GUI；
 - 无完整 task evaluation；
 - capsule inertia 是近似；
-- compound inertia 已能计算完整张量和主轴，但 production MJCF 编译路径尚未接入 principal-axis orientation；
+- compound inertia 已能计算完整张量和主轴，MassProperties 与 MuJoCo inertial quat 已接入；
 - spherical cap 的解析惯量尚未实现；
-- wedge/ramp 和 regular prism 已有 polyhedral full tensor；frustum 已有连续解析 full tensor，但 production MJCF 编译路径尚未接入 principal-axis orientation；
+- wedge/ramp 和 regular prism 已有 polyhedral full tensor；frustum 已有连续解析 full tensor；
 - MuJoCo 编译器已为 wedge/ramp、cone、frustum 和 regular prism 提供 convex mesh fallback，但 ellipsoid 与 spherical cap 仍未接入；
 - MuJoCo 软约束接触力峰值具有 timestep 与 solver 参数依赖性；
 - V 槽和 COM torque aggregation 当前只是测试/示例局部计算，不是生产 API。
@@ -1543,6 +1552,7 @@ Robot interaction and task evaluation
 
 - `tests/unit/test_inertia.py`
 - `tests/unit/test_compound_inertia.py`
+- `tests/unit/test_mass_properties.py`
 - `tests/unit/test_polyhedral_inertia.py`
 - `tests/unit/test_scale_baking.py`
 - `tests/unit/test_transform_composition.py`
