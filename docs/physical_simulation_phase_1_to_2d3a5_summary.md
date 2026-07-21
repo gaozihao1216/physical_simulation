@@ -1,4 +1,4 @@
-# Physical Simulation Phase 1–2D3A.5 技术总结
+﻿# Physical Simulation Phase 1–2D3A.5 技术总结
 
 本文档总结 `physical_simulation` 项目从 Phase 1 到 Phase 2D3A.5 已经完成的真实能力、数学约定、测试证据和当前限制。内容基于当前仓库中的源码、测试、示例程序、`README.md`、`docs/architecture.md` 与 `pyproject.toml` 核对后编写，而不是仅根据提交信息或路线图拼接。
 
@@ -11,7 +11,8 @@ supplement: expanded parametric GeometrySpec module
 supplement: MuJoCo convex mesh fallback for selected parametric geometry
 supplement: full tensor inertia for wedge, frustum, and regular prism
 supplement: extended MassProperties with principal inertial frame
-test result: 248 passed
+supplement: free-body velocity and external force control API
+test result: 255 passed
 ```
 
 本文档围绕以下主线组织：
@@ -65,7 +66,6 @@ Physics IR
 - task framework 与 task success metrics；
 - public per-body / body-pair contact wrench aggregation；
 - contact impulse API；
-- initial velocity / set velocity / external force API；
 - GUI。
 
 ## 2. 总体架构
@@ -619,7 +619,26 @@ validate finite backend state
 return SimulationStepResult
 ```
 
-当前 `action` 只能为 `None`；传入非空 action 会抛出 `UnsupportedBackendOperationError`。这不是控制接口。
+当前 `action` 只能为 `None`；传入非空 action 会抛出 `UnsupportedBackendOperationError`。控制和扰动通过显式 backend 方法完成，而不是通过 `step(action=...)`。
+
+### 10.3 控制与外力接口
+
+MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
+
+```text
+set_body_velocity(runtime_body_id, linear_velocity, angular_velocity, update_initial=False)
+apply_force(runtime_body_id, force, point=None)
+apply_torque(runtime_body_id, torque)
+clear_applied_forces()
+```
+
+`set_body_velocity()` 写入 freejoint 对应的 `qvel`，线速度和角速度均为世界系；`update_initial=True` 会同步更新 reset 使用的初始 `qvel`。`apply_force()` 写入 MuJoCo `xfrc_applied[body, 0:3]`。如果 `point` 不为空，`point` 被解释为世界系施力点，并额外写入关于当前 body COM 的等效力矩：
+
+$$
+\boldsymbol \tau = (\mathbf p-\mathbf x_{\mathrm{COM}})\times\mathbf F
+$$
+
+`apply_torque()` 写入 `xfrc_applied[body, 3:6]`；`clear_applied_forces()` 清空 `xfrc_applied` 和 `qfrc_applied`。这些接口只支持有 freejoint 的 dynamic body，对 static、kinematic 或 fixed-base body 会抛出 `UnsupportedBackendOperationError`。
 
 若 timestep 为 $\Delta t$，理想情况下：
 
@@ -629,7 +648,7 @@ $$
 
 测试中使用 `dt=1/240 s`。
 
-### 10.3 body state
+### 10.4 body state
 
 `get_body_state(runtime_body_id)` 读取：
 
@@ -1353,14 +1372,14 @@ wrenches = backend.get_contact_wrenches()
 backend.close()
 ```
 
-当前不要在示例中使用尚未实现的 `apply_force`、`set_velocity`、joint、robot 或 mesh API。
+当前不要在示例中使用尚未实现的 joint、robot 或通用 mesh import API。自由动态刚体可使用 `set_body_velocity()`、`apply_force()`、`apply_torque()` 和 `clear_applied_forces()` 做控制/扰动实验。
 
 ## 21. 测试体系与回归证据
 
 当前全量测试：
 
 ```text
-248 passed
+255 passed
 ```
 
 阶段测试数量记录：
@@ -1383,6 +1402,7 @@ backend.close()
 | MuJoCo mesh fallback | 234 |
 | Polyhedral/frustum full inertia | 240 |
 | Extended MassProperties inertial frame | 248 |
+| Control and external force API | 255 |
 
 测试类型包括：
 
@@ -1394,6 +1414,7 @@ backend.close()
 - deterministic convex mesh fallback 与真实 MuJoCo 加载；
 - wedge/ramp、frustum、regular prism full inertia tensor；
 - MassProperties full tensor/principal axes serialization and MuJoCo inertial quat；
+- free-body velocity, force, torque, and clear-applied-force controls；
 - compiler XML 测试；
 - MuJoCo optional dependency 测试；
 - MuJoCo 真实模型加载；
@@ -1418,6 +1439,7 @@ backend.close()
 | MuJoCo convex mesh fallback | 已实现并测试 | `test_mujoco_mesh_fallback.py`, `test_mujoco_mesh_fallback.py` integration |
 | Wedge/Frustum/RegularPrism full inertia | 已实现并测试 | `test_polyhedral_inertia.py` |
 | MassProperties principal frame | 已实现并测试 | `test_mass_properties.py`, `test_mujoco_model_loading.py` |
+| Free-body control/external forces | 已实现并测试 | `test_mujoco_control_forces.py`, `test_mujoco_body_state_mapping.py` |
 | Box/Sphere/Cylinder/Capsule inertia | 已实现并测试 | `test_inertia.py` |
 | Cone/Ellipsoid inertia | 已实现并测试 | `test_inertia.py` |
 | Capsule 组合近似与平行轴 | 已测试 | `test_capsule_inertia_uses_volume_mass_split_and_parallel_axis` |
@@ -1441,8 +1463,8 @@ backend.close()
 | 镜像转动方向 | 测试级验证 | `test_mujoco_mirrored_offcenter_impact.py` |
 | Contact impulse | 未实现 | 无 API |
 | public per-body wrench aggregation | 未实现 | 仅 tests/helpers |
-| Initial velocity API | 未实现 | 无 API |
-| `apply_force` | 未实现 | backend 抛 `UnsupportedBackendOperationError` |
+| Initial/free-body velocity API | 已实现 | `set_body_velocity()` |
+| `apply_force` / `apply_torque` | 已实现 | free dynamic body only |
 | Joint/Robot | 未实现 | 占位模块 |
 | Mesh collider / GLB integration | 未实现 | 无导入路径 |
 
@@ -1450,9 +1472,7 @@ backend.close()
 
 必须明确的限制如下：
 
-- 无 public `initial_linear_velocity` / `initial_angular_velocity`；
-- 无 `set_body_velocity()`；
-- `apply_force()` 尚未实现；
+- 无 scene-level declarative `initial_linear_velocity` / `initial_angular_velocity` 字段；当前通过 backend `set_body_velocity(update_initial=True)` 设置；
 - 无 contact impulse API；
 - 无 public per-body contact wrench aggregation；
 - 无 public body-pair contact wrench aggregation；

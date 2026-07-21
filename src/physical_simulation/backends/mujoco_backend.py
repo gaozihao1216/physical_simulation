@@ -19,7 +19,7 @@ from physical_simulation.backends.errors import (
 from physical_simulation.compilers import MuJoCoCompilationResult, MuJoCoCompiler
 from physical_simulation.runtime import ContactPoint, ContactWrench, RigidBodyState, SimulationStepResult
 from physical_simulation.scene import PhysicsSceneSpec
-from physical_simulation.validation.asset_validator import validate_physics_scene
+from physical_simulation.validation.asset_validator import _as_float_tuple, validate_physics_scene
 
 
 Vector3 = tuple[float, float, float]
@@ -97,6 +97,14 @@ def _negate_vector(vector: Vector3) -> Vector3:
     return tuple(-value for value in vector)
 
 
+def _cross(first: Vector3, second: Vector3) -> Vector3:
+    return (
+        first[1] * second[2] - first[2] * second[1],
+        first[2] * second[0] - first[0] * second[2],
+        first[0] * second[1] - first[1] * second[0],
+    )
+
+
 def _add_vectors(first: Vector3, second: Vector3) -> Vector3:
     return tuple(first[index] + second[index] for index in range(3))
 
@@ -107,6 +115,17 @@ def _dot(first: Vector3, second: Vector3) -> float:
 
 def _norm(vector: Vector3) -> float:
     return math.sqrt(_dot(vector, vector))
+
+
+def _validate_backend_vector3(value: Any, *, field_name: str) -> Vector3:
+    return tuple(
+        _as_float_tuple(
+            value,
+            field_name=field_name,
+            length=3,
+            error_type=MuJoCoRuntimeError,
+        )
+    )  # type: ignore[return-value]
 
 
 class MuJoCoBackend(PhysicsBackend):
@@ -371,12 +390,87 @@ class MuJoCoBackend(PhysicsBackend):
         return tuple(self._build_contact_wrench(mapped) for mapped in self._extract_mapped_contacts())
 
     def apply_force(self, body_id: str, force: Any, point: Optional[Any] = None) -> None:
-        """Force application is not implemented in Phase 2C2."""
-        raise UnsupportedBackendOperationError(
-            f"MuJoCoBackend.apply_force() is not implemented in Phase 2C2; "
-            f"scene_id={self._current_scene_id()!r}, body_id={body_id!r}, "
-            f"step_index={self._step_index}, time={self._current_time()}"
-        )
+        """Apply a world-space force to a free body for subsequent steps.
+
+        If ``point`` is provided, it is interpreted as a world-space application
+        point and converted into an equivalent COM torque ``(point - COM) x F``.
+        Applied forces persist until reset(), close(), or clear_applied_forces().
+        """
+        self._require_loaded("apply_force")
+        mj_body_id = self._require_free_body("apply_force", body_id)
+        force_vector = _validate_backend_vector3(force, field_name="force")
+        torque_vector = (0.0, 0.0, 0.0)
+        if point is not None:
+            point_vector = _validate_backend_vector3(point, field_name="point")
+            body_position = self._float_tuple(self._data.xpos[mj_body_id], 3)
+            offset = tuple(point_vector[index] - body_position[index] for index in range(3))
+            torque_vector = _cross(offset, force_vector)  # type: ignore[arg-type]
+        self._data.xfrc_applied[mj_body_id, 0:3] += force_vector
+        self._data.xfrc_applied[mj_body_id, 3:6] += torque_vector
+
+    def apply_torque(self, body_id: str, torque: Any) -> None:
+        """Apply a world-space torque to a free body for subsequent steps."""
+        self._require_loaded("apply_torque")
+        mj_body_id = self._require_free_body("apply_torque", body_id)
+        torque_vector = _validate_backend_vector3(torque, field_name="torque")
+        self._data.xfrc_applied[mj_body_id, 3:6] += torque_vector
+
+    def clear_applied_forces(self) -> None:
+        """Clear all externally applied Cartesian forces and generalized forces."""
+        self._require_loaded("clear_applied_forces")
+        self._data.xfrc_applied[:] = 0.0
+        self._data.qfrc_applied[:] = 0.0
+
+    def set_body_velocity(
+        self,
+        body_id: str,
+        linear_velocity: Any,
+        angular_velocity: Any = (0.0, 0.0, 0.0),
+        *,
+        update_initial: bool = False,
+    ) -> SimulationStepResult:
+        """Set world-space linear and angular velocity for a free body."""
+        self._require_loaded("set_body_velocity")
+        mujoco = _import_mujoco()
+        mj_body_id = self._require_free_body("set_body_velocity", body_id)
+        dof_adr = self._free_joint_dof_adr(mj_body_id)
+        linear = _validate_backend_vector3(linear_velocity, field_name="linear_velocity")
+        angular = _validate_backend_vector3(angular_velocity, field_name="angular_velocity")
+        try:
+            self._data.qvel[dof_adr : dof_adr + 3] = linear
+            self._data.qvel[dof_adr + 3 : dof_adr + 6] = angular
+            if update_initial:
+                self._initial_qvel[:] = self._data.qvel
+            mujoco.mj_forward(self._model, self._data)
+            self._validate_finite_backend_state()
+            return self._build_step_result()
+        except MuJoCoRuntimeError:
+            raise
+        except Exception as exc:
+            raise MuJoCoRuntimeError(
+                f"failed to set MuJoCo body velocity; scene_id={self._current_scene_id()!r}; "
+                f"runtime_body_id={body_id!r}; step_index={self._step_index}; "
+                f"time={self._current_time()}; original_error={exc}"
+            ) from exc
+
+    def _require_free_body(self, operation: str, runtime_body_id: str) -> int:
+        mj_body_id = self._require_runtime_body_id(runtime_body_id)
+        if self._free_joint_dof_adr(mj_body_id) is None:
+            raise UnsupportedBackendOperationError(
+                f"MuJoCoBackend.{operation}() requires a free dynamic body; "
+                f"scene_id={self._current_scene_id()!r}, runtime_body_id={runtime_body_id!r}, "
+                f"step_index={self._step_index}, time={self._current_time()}"
+            )
+        return mj_body_id
+
+    def _free_joint_dof_adr(self, mj_body_id: int) -> Optional[int]:
+        mujoco = _import_mujoco()
+        if int(self._model.body_jntnum[mj_body_id]) != 1:
+            return None
+        joint_id = int(self._model.body_jntadr[mj_body_id])
+        if int(self._model.jnt_type[joint_id]) != int(mujoco.mjtJoint.mjJNT_FREE):
+            return None
+        return int(self._model.jnt_dofadr[joint_id])
 
     def _read_body_world_velocity(
         self,

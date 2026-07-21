@@ -45,5 +45,24 @@ class PhysicsBackend(ABC):
         """Apply a force to a body."""
 
     @abstractmethod
+    def apply_torque(self, body_id: str, torque: Any) -> None:
+        """Apply a torque to a body."""
+
+    @abstractmethod
+    def clear_applied_forces(self) -> None:
+        """Clear externally applied forces and torques."""
+
+    @abstractmethod
+    def set_body_velocity(
+        self,
+        body_id: str,
+        linear_velocity: Any,
+        angular_velocity: Any = (0.0, 0.0, 0.0),
+        *,
+        update_initial: bool = False,
+    ) -> SimulationStepResult:
+        """Set a free body's velocity."""
+
+    @abstractmethod
     def close(self) -> None:
         """Release backend resources."""

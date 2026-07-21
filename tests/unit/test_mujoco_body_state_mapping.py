@@ -131,5 +131,42 @@ def test_unsupported_phase_2c2_operations_raise_explicit_errors() -> None:
         backend.step(action={"ignored": False})
     with pytest.raises(UnsupportedBackendOperationError):
         backend.get_joint_state("joint")
-    with pytest.raises(UnsupportedBackendOperationError):
-        backend.apply_force(runtime_id, (1.0, 0.0, 0.0))
+
+    static_body = create_box("static_body", (1.0, 1.0, 1.0), body_type="static")
+    static_asset = create_single_body_asset(asset_id="static_asset", body=static_body)
+    static_scene = create_scene(scene_id="static_force", instances=(AssetInstanceSpec("static_01", static_asset),))
+    static_backend = MuJoCoBackend()
+    static_backend.load_scene(static_scene)
+    with pytest.raises(UnsupportedBackendOperationError, match="free dynamic body"):
+        static_backend.apply_force("static_01/static_body", (1.0, 0.0, 0.0))
+
+
+def test_set_body_velocity_updates_free_body_state_and_reset_initial_velocity() -> None:
+    backend, runtime_id = _single_sphere_backend()
+
+    result = backend.set_body_velocity(
+        runtime_id,
+        linear_velocity=(1.0, 0.0, 0.0),
+        angular_velocity=(0.0, 0.0, 2.0),
+        update_initial=True,
+    )
+    state = result.get_body_state(runtime_id)
+
+    assert state.linear_velocity == pytest.approx((1.0, 0.0, 0.0))
+    assert state.angular_velocity == pytest.approx((0.0, 0.0, 2.0))
+    reset_state = backend.reset().get_body_state(runtime_id)
+    assert reset_state.linear_velocity == pytest.approx((1.0, 0.0, 0.0))
+    assert reset_state.angular_velocity == pytest.approx((0.0, 0.0, 2.0))
+
+
+def test_clear_applied_forces_resets_mujoco_external_force_arrays() -> None:
+    backend, runtime_id = _single_sphere_backend()
+
+    backend.apply_force(runtime_id, (1.0, 2.0, 3.0), point=(1.0, 3.0, 3.0))
+    backend.apply_torque(runtime_id, (4.0, 5.0, 6.0))
+    assert backend._data.xfrc_applied.any()
+
+    backend.clear_applied_forces()
+
+    assert not backend._data.xfrc_applied.any()
+    assert not backend._data.qfrc_applied.any()

@@ -113,6 +113,17 @@ ContactWrench sequence
 
 当前关于 COM 的合力和合力矩只在测试与示例中局部计算。正式的 per-body / body-pair 聚合、冲量积分和公开分析 API 将在 Phase 2D3B 设计。
 
+Runtime control 已支持自由动态刚体的基础扰动接口：
+
+```text
+set_body_velocity
+apply_force
+apply_torque
+clear_applied_forces
+```
+
+这些接口只作用于有 freejoint 的 dynamic body。`apply_force(point=...)` 接收世界系施力点，并转换为关于当前 body COM 的等效力矩。它们用于推动、撞击、扰动稳定性和后续机器人任务验证；`step(action=...)` 仍未作为通用控制入口。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：

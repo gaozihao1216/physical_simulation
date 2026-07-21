@@ -133,8 +133,6 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 - 跨接触点聚合 API。
 - 关于刚体质心的 net contact torque。
 - time-integrated impulse / collision impulse。
-- 初始速度配置。
-- `apply_force`。
 - 定量摩擦验证。
 - restitution mapping。
 - joints、robots、meshes、GUI 和完整 task framework。
@@ -157,7 +155,18 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 
 此前 box-ground 支撑测试虽然有多个 contact point，但宏观运动和接触力方向高度对称，接近一维支撑。Phase 2D3A.5 专门验证多方向接触、多个外部刚体共同作用，以及偏心接触导致的旋转响应。
 
-当前仍未新增公共聚合 API。关于刚体 COM 的 net force / net torque 只在测试和示例中局部计算，正式 `BodyContactWrench`、`BodyPairContactWrench`、impulse、initial velocity、`set_body_velocity` 和 `apply_force` 仍留到后续阶段。
+当前仍未新增公共聚合 API。关于刚体 COM 的 net force / net torque 只在测试和示例中局部计算，正式 `BodyContactWrench`、`BodyPairContactWrench` 和 impulse 仍留到后续阶段。
+
+## 控制与外力接口
+
+MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
+
+- `set_body_velocity()`：设置世界系线速度和角速度，可选择 `update_initial=True` 让 reset 后保留该初速度。
+- `apply_force()`：施加世界系外力；如果提供 world-space `point`，会转换为等效力矩 `(point - COM) x force`。
+- `apply_torque()`：施加世界系外力矩。
+- `clear_applied_forces()`：清空 `xfrc_applied` 和 `qfrc_applied`。
+
+这些接口只支持有 freejoint 的 dynamic body；static、kinematic 或 fixed-base body 会明确报错。
 
 ## Phase 2D2 当前能力
 
@@ -179,7 +188,6 @@ Phase 2D1 / 2D1.5 尚未读取求解器接触力、冲量或任务成功指标�
 - contact impulse
 - restitution mapping
 - quantitative friction validation
-- `apply_force`
 - joint
 - actuator
 - robot
