@@ -203,6 +203,19 @@ SimulationStepResult per physics step
 
 Episode 0 / `PRIMARY_IMPACT` 是评估 adaptive 碰撞精度的主要对象。coarse/fine/adaptive 必须先匹配 episode，再比较 restitution、penetration、duration、impact speed 和 start time。运行级 reference 可能因为后续反弹数量不同而 unresolved，但 primary-impact reference 仍可能已经 timestep 收敛。episode segmentation 只属于诊断层，不修改 MuJoCo solver、不修改 adaptive state machine，也不自动调整 `solref/solimp`。
 
+Phase 2G7 将 primary-impact comparison、episode-level reference convergence、run-level convergence 和 adaptive trace 汇总到 primary-impact failure attribution：
+
+```text
+PrimaryImpactBenchmarkComparison
+-> EpisodeReferenceConvergenceResult
+-> ReferenceConvergenceResult
+-> AdaptiveDiagnosticTrace
+-> PrimaryImpactFailureAttribution
+-> PrimaryAttributionDataset
+```
+
+primary-impact attribution 是默认评估路径：先判断首次有效冲击是否 matched、reference 是否收敛、adaptive 是否在 restitution、penetration 和 duration 上改善。run-level attribution 只用于长轨迹整体解释，或在 primary episode 缺失 / unmatched 时作为 fallback。后续反弹和 secondary episodes 可以解释 run-level 指标差异，但不能覆盖已经收敛且已匹配的 first-impact 结论。prediction lead 太短、达到最大 substep 数或 secondary episode 差异在 primary metrics 已改善时只作为 warning/evidence，不作为失败原因。`attribute_adaptive_failure()` 是运行级 legacy 入口；`attribute_primary_impact_failure()` 是首选的 primary-impact 入口。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：
@@ -246,7 +259,7 @@ Sphere / plane or sphere / sphere state
 
 该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 本身不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`。
 
-Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。Phase 2G5 进一步检查 fixed-fine reference 是否 timestep 收敛，并对 adaptive 未改善 case 生成结构化 failure attribution。Phase 2G6 将运行级结果拆成独立 contact episodes，并优先比较匹配后的 primary impact。adaptive 的目标是接近收敛参考的接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成、自动调参或 robot/task policy。
+Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。Phase 2G5 进一步检查 fixed-fine reference 是否 timestep 收敛，并对 adaptive 未改善 case 生成结构化 failure attribution。Phase 2G6 将运行级结果拆成独立 contact episodes，并优先比较匹配后的 primary impact。Phase 2G7 进一步把 primary-impact 结论设为默认归因口径，run-level 归因只作为长轨迹解释或 primary 缺失 / unmatched 时的 fallback。adaptive 的目标是接近收敛参考的首次接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成、自动调参或 robot/task policy。
 
 fixed coarse 下出现 `e > 1` 被视为数值失真诊断，不视为材料具有额外能量。近似法向能量比 `eta_E = e^2` 只用于 sphere-plane 法向碰撞诊断，不声称代表任意三维碰撞的完整能量守恒分析。
 

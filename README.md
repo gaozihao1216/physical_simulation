@@ -96,6 +96,7 @@ physical_simulation/
 - Phase 2G4：Adaptive Substepping Benchmark and Failure Diagnostics。
 - Phase 2G5：Adaptive Failure Attribution and Reference Convergence。
 - Phase 2G6：Episode-Level Contact Metrics and Event Matching。
+- Phase 2G7：Primary-Impact Failure Attribution Integration。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -266,6 +267,21 @@ Phase 2G5 只做诊断和报告，不自动修改 adaptive 配置，不做自动
 法向相对速度约定固定为：`normal_relative_velocity < 0` 表示沿接触法向接近，`> 0` 表示分离。sphere-plane 的法向为 `plane -> sphere`；sphere-sphere 的法向为 `body_a -> body_b`。episode restitution 使用该 episode 接触前/接触开始处的法向接近速度和接触结束后的首次法向分离速度，不跨越多个 episode。
 
 一次 simulation run 可以包含多个 contact episodes；运行级 restitution、maximum penetration 和 contact duration 可能混合多次碰撞。Phase 2G6 将 episode segmentation 作为数值诊断层，不修改 MuJoCo contact solver、不修改 adaptive timestep 决策，也不会自动调整 `solref/solimp`。
+
+## Phase 2G7 当前能力
+
+已支持 primary-impact 优先的 adaptive 归因集成：
+
+- `attribute_primary_impact_failure()`：优先使用匹配后的 `PRIMARY_IMPACT` episode、episode-level comparison 和 primary reference convergence 做归因。
+- `AttributionScope`：区分 `PRIMARY_IMPACT`、`RUN_LEVEL`、`FALLBACK_RUN_LEVEL` 和 `UNAVAILABLE`，避免把运行级指标误读成首次冲击指标。
+- `PrimaryImpactCaseOutcome`：区分 `IMPROVED`、`PARTIALLY_IMPROVED`、`NOT_IMPROVED`、`BOTH_ACCEPTABLE`、`REFERENCE_UNRESOLVED`、`EPISODE_UNMATCHED` 和 `INVALID_ADAPTIVE`。
+- primary metric outcomes：分别比较 restitution、maximum penetration 和 contact duration，只有 primary reference 收敛且 episode 匹配后才判定 adaptive 是否改善。
+- run-level fallback：仅在 primary episode 缺失或 unmatched 时作为退路；如果 primary reference 未收敛，不会用 run-level 结果覆盖。
+- secondary episode diagnostics：后续反弹、多 episode、contact chatter、prediction lead 和 substep cap 会作为辅助证据；如果首次冲击指标已经改善，这些现象不会反向判定 primary impact 失败。
+- `RunPrimaryAttributionDifference`：显式记录 run-level 和 primary-level 结论差异，例如 run-level unresolved 但 primary 已收敛，或 run-level not improved 但 primary improved。
+- `examples/20_mujoco_primary_impact_attribution.py`：运行 primary-impact attribution 示例，并导出 CSV、JSON 和 Markdown 报告到 `artifacts/contact_primary_attribution/`。
+
+primary-impact attribution 是当前 adaptive 碰撞精度诊断的首选路径。运行级 `attribute_adaptive_failure()` 仍保留用于长轨迹整体诊断，以及 primary episode 缺失或无法匹配时的 fallback。后续反弹不能覆盖首次冲击的评价；primary reference convergence 和 run-level reference convergence 是不同问题，必须分别报告。
 
 ## 控制与外力接口
 

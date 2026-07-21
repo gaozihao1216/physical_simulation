@@ -191,6 +191,10 @@ class AdaptiveFailureReason(Enum):
     EPISODE_MISMATCH = "episode_mismatch"
     CONTACT_CHATTER = "contact_chatter"
     PRIMARY_IMPACT_NOT_FOUND = "primary_impact_not_found"
+    PRIMARY_RESTITUTION_NOT_IMPROVED = "primary_restitution_not_improved"
+    PRIMARY_PENETRATION_NOT_IMPROVED = "primary_penetration_not_improved"
+    PRIMARY_DURATION_NOT_IMPROVED = "primary_duration_not_improved"
+    RUN_LEVEL_SECONDARY_EPISODE_DIFFERENCE = "run_level_secondary_episode_difference"
     UNKNOWN = "unknown"
 
 
@@ -201,6 +205,7 @@ class ImprovementOutcome(Enum):
     NOT_IMPROVED = "not_improved"
     BOTH_ACCEPTABLE = "both_acceptable"
     REFERENCE_UNRESOLVED = "reference_unresolved"
+    EPISODE_UNMATCHED = "episode_unmatched"
     NOT_APPLICABLE = "not_applicable"
 
 
