@@ -9,6 +9,9 @@ from physical_simulation.validation.asset_validator import _as_float_tuple, _fin
 from physical_simulation.validation.errors import PhysicsValidationError
 
 
+DEFAULT_MUJOCO_CONTACT_SOLVER_PARAMS = None
+
+
 @dataclass(frozen=True)
 class MuJoCoContactSolverParams:
     """Optional MuJoCo soft-contact parameters for one collision geom."""
@@ -98,3 +101,61 @@ class MuJoCoContactSolverParams:
             priority=data.get("priority", 0),
             solmix=data.get("solmix", 1.0),
         )
+
+
+DEFAULT_MUJOCO_CONTACT_SOLVER_PARAMS = MuJoCoContactSolverParams(
+    solref=(0.02, 1.0),
+    solimp=(0.9, 0.95, 0.001, 0.5, 2.0),
+)
+
+
+def resolve_mujoco_contact_solver_params(
+    first: MuJoCoContactSolverParams | None,
+    second: MuJoCoContactSolverParams | None,
+    *,
+    default: MuJoCoContactSolverParams = DEFAULT_MUJOCO_CONTACT_SOLVER_PARAMS,
+) -> MuJoCoContactSolverParams:
+    """Resolve a deterministic pair-level solver parameter estimate.
+
+    This mirrors the project policy used for explicit fixed-fixed pairs. Dynamic
+    contacts still use MuJoCo's native geom priority/solmix behavior at runtime;
+    this helper only provides a stable solver-timescale estimate for adaptive
+    pre-contact prediction.
+    """
+    if first is None and second is None:
+        return default
+    if first is None:
+        return second  # type: ignore[return-value]
+    if second is None:
+        return first
+    if first.priority > second.priority:
+        return first
+    if second.priority > first.priority:
+        return second
+    return MuJoCoContactSolverParams(
+        solref=_mix_equal_priority_solref(first, second),
+        solimp=_weighted_average(first.solimp, first.solmix, second.solimp, second.solmix),
+        margin=first.margin + second.margin,
+        gap=first.gap + second.gap,
+        priority=first.priority,
+        solmix=max(first.solmix, second.solmix),
+    )
+
+
+def _mix_equal_priority_solref(
+    first: MuJoCoContactSolverParams,
+    second: MuJoCoContactSolverParams,
+) -> tuple[float, float]:
+    return _weighted_average(first.solref, first.solmix, second.solref, second.solmix)
+
+
+def _weighted_average(
+    first: tuple[float, ...],
+    first_weight: float,
+    second: tuple[float, ...],
+    second_weight: float,
+) -> tuple[float, ...]:
+    total = first_weight + second_weight
+    if total <= 1.0e-12:
+        return tuple((a + b) / 2.0 for a, b in zip(first, second))
+    return tuple((a * first_weight + b * second_weight) / total for a, b in zip(first, second))

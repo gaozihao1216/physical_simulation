@@ -14,12 +14,14 @@ from physical_simulation.compilers.mujoco_compiler import (
     MUJOCO_ROLLING_FRICTION,
     MUJOCO_TORSIONAL_FRICTION,
     MuJoCoCompiler,
+    collision_pair_enabled,
     geometry_to_mujoco,
     make_mujoco_name,
 )
-from physical_simulation.compilers.mujoco_types import MuJoCoCompilationResult
+from physical_simulation.compilers.mujoco_types import CompiledColliderMetadata, MuJoCoCompilationResult
 
 __all__ = [
+    "CompiledColliderMetadata",
     "MuJoCoCompiler",
     "MuJoCoCompilationResult",
     "PhysicsCompilationError",
@@ -33,5 +35,6 @@ __all__ = [
     "MUJOCO_TORSIONAL_FRICTION",
     "MUJOCO_ROLLING_FRICTION",
     "geometry_to_mujoco",
+    "collision_pair_enabled",
     "make_mujoco_name",
 ]

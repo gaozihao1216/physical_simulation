@@ -4,6 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from physical_simulation.assets import GeometrySpec, Transform
+from physical_simulation.mujoco.contact_params import MuJoCoContactSolverParams
+
+
+@dataclass(frozen=True)
+class CompiledColliderMetadata:
+    """Source metadata for one compiled collision collider."""
+
+    collider_id: str
+    runtime_body_id: str
+    mujoco_geom_name: str
+    geometry: GeometrySpec
+    world_transform: Transform
+    is_dynamic: bool
+    collision_group: int
+    collision_mask: int
+    contact_params: MuJoCoContactSolverParams | None
+
 
 @dataclass(frozen=True)
 class MuJoCoCompilationResult:
@@ -13,6 +31,7 @@ class MuJoCoCompilationResult:
     mjcf: str
     runtime_body_to_mujoco_name: tuple[tuple[str, str], ...]
     mujoco_geom_to_runtime_body: tuple[tuple[str, str], ...]
+    collider_metadata: tuple[CompiledColliderMetadata, ...] = ()
 
     def get_mujoco_body_name(self, runtime_body_id: str) -> str:
         """Return the MuJoCo body name for a runtime body id."""

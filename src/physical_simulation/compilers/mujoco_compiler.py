@@ -27,8 +27,8 @@ from physical_simulation.compilers.errors import (
     UnsupportedPhysicsFeatureError,
 )
 from physical_simulation.collision.convex_mesh import geometry_to_convex_mesh, supports_mujoco_mesh_fallback
-from physical_simulation.compilers.mujoco_types import MuJoCoCompilationResult
-from physical_simulation.mujoco.contact_params import MuJoCoContactSolverParams
+from physical_simulation.compilers.mujoco_types import CompiledColliderMetadata, MuJoCoCompilationResult
+from physical_simulation.mujoco.contact_params import MuJoCoContactSolverParams, resolve_mujoco_contact_solver_params
 from physical_simulation.runtime import make_runtime_body_id
 from physical_simulation.scene import AssetInstanceSpec, PhysicsSceneSpec
 from physical_simulation.utils import format_float, format_vector, indent_xml
@@ -113,6 +113,19 @@ def _collision_group_to_contype(group: int, *, scene_id: str, collider_id: str) 
     return group
 
 
+def collision_pair_enabled(
+    first_contype: int,
+    first_conaffinity: int,
+    second_contype: int,
+    second_conaffinity: int,
+) -> bool:
+    """Return whether two compiled collision bitmasks allow contact."""
+    return bool(
+        (first_contype & second_conaffinity)
+        or (second_contype & first_conaffinity)
+    )
+
+
 class MuJoCoCompiler:
     """Compile backend-independent scene specs into deterministic MJCF XML."""
 
@@ -141,6 +154,7 @@ class MuJoCoCompiler:
 
         body_mapping: list[tuple[str, str]] = []
         geom_mapping: list[tuple[str, str]] = []
+        collider_metadata: list[CompiledColliderMetadata] = []
         contact_pair_candidates: list[_ContactPairCandidate] = []
 
         for instance in scene.instances:
@@ -152,6 +166,7 @@ class MuJoCoCompiler:
                 mesh_assets=mesh_assets,
                 body_mapping=body_mapping,
                 geom_mapping=geom_mapping,
+                collider_metadata=collider_metadata,
                 contact_pair_candidates=contact_pair_candidates,
             )
 
@@ -165,6 +180,7 @@ class MuJoCoCompiler:
             mjcf=mjcf,
             runtime_body_to_mujoco_name=tuple(body_mapping),
             mujoco_geom_to_runtime_body=tuple(geom_mapping),
+            collider_metadata=tuple(collider_metadata),
         )
 
     def _compile_instance(
@@ -177,6 +193,7 @@ class MuJoCoCompiler:
         mesh_assets: dict[str, str],
         body_mapping: list[tuple[str, str]],
         geom_mapping: list[tuple[str, str]],
+        collider_metadata: list[CompiledColliderMetadata],
         contact_pair_candidates: list[_ContactPairCandidate],
     ) -> None:
         asset = instance.asset
@@ -230,6 +247,7 @@ class MuJoCoCompiler:
                 mesh_assets=mesh_assets,
                 runtime_body_id=runtime_body_id,
                 geom_mapping=geom_mapping,
+                collider_metadata=collider_metadata,
                 contact_pair_candidates=contact_pair_candidates,
             )
 
@@ -299,6 +317,7 @@ class MuJoCoCompiler:
         mesh_assets: dict[str, str],
         runtime_body_id: str,
         geom_mapping: list[tuple[str, str]],
+        collider_metadata: list[CompiledColliderMetadata],
         contact_pair_candidates: list[_ContactPairCandidate],
     ) -> None:
         if not collider.enabled:
@@ -348,6 +367,19 @@ class MuJoCoCompiler:
         )
         ET.SubElement(body_element, "geom", geom_attributes)
         geom_mapping.append((geom_name, runtime_body_id))
+        collider_metadata.append(
+            CompiledColliderMetadata(
+                collider_id=collider.collider_id,
+                runtime_body_id=runtime_body_id,
+                mujoco_geom_name=geom_name,
+                geometry=collider.geometry,
+                world_transform=instance.transform.compose(body.transform).compose(collider.local_transform),
+                is_dynamic=self._body_has_dof(body=body, instance=instance),
+                collision_group=contype,
+                collision_mask=conaffinity,
+                contact_params=collider.mujoco_contact_params,
+            )
+        )
         contact_pair_candidates.append(
             _ContactPairCandidate(
                 geom_name=geom_name,
@@ -431,7 +463,7 @@ class MuJoCoCompiler:
                     continue
                 if not self._explicit_contact_pair_supported(first, second):
                     continue
-                if not self._collision_pair_enabled(
+                if not collision_pair_enabled(
                     first.contype,
                     first.conaffinity,
                     second.contype,
@@ -445,18 +477,6 @@ class MuJoCoCompiler:
         contact_element = ET.SubElement(root, "contact")
         for key in sorted(pair_elements):
             ET.SubElement(contact_element, "pair", pair_elements[key])
-
-    def _collision_pair_enabled(
-        self,
-        first_contype: int,
-        first_conaffinity: int,
-        second_contype: int,
-        second_conaffinity: int,
-    ) -> bool:
-        return bool(
-            (first_contype & second_conaffinity)
-            or (second_contype & first_conaffinity)
-        )
 
     def _body_has_dof(self, *, body: RigidBodySpec, instance: AssetInstanceSpec) -> bool:
         return body.body_type == "dynamic" and not instance.fixed_base
@@ -520,22 +540,7 @@ class MuJoCoCompiler:
     ) -> MuJoCoContactSolverParams | None:
         if first is None and second is None:
             return None
-        if first is None:
-            return second
-        if second is None:
-            return first
-        if first.priority > second.priority:
-            return first
-        if second.priority > first.priority:
-            return second
-        return MuJoCoContactSolverParams(
-            solref=self._mix_equal_priority_solref(first, second),
-            solimp=self._weighted_average(first.solimp, first.solmix, second.solimp, second.solmix),
-            margin=self._explicit_pair_margin(first, second),
-            gap=self._explicit_pair_gap(first, second),
-            priority=first.priority,
-            solmix=max(first.solmix, second.solmix),
-        )
+        return resolve_mujoco_contact_solver_params(first, second)
 
     def _mix_equal_priority_solref(
         self,

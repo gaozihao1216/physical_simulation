@@ -244,6 +244,19 @@ checked AdaptiveBatchCase
 
 该层解释 reference 为什么未收敛，而不是让 adaptive 自动调参。报告会同时列出 restitution、maximum penetration、contact duration、primary-impact start time、impact speed 和 separation speed 的 refinement 序列，并将 `NOT_CHECKED`、`CONVERGED`、`NEAR_CONVERGED`、`NOT_CONVERGED`、`INVALID` 分开。`NEAR_CONVERGED` 只表示诊断上接近容差，不作为正式 converged。extra-fine 只对 unresolved case 追加运行，用于判断问题是 timestep 仍不够细、episode matching 不稳定、最大穿透离散采样、contact duration 边界变化，还是非单调 refinement。
 
+Phase 2H1 在 Backend / Runtime 之间增加 automatic adaptive candidate construction：
+
+```text
+PhysicsSceneSpec
+-> MuJoCoCompiler
+-> CompiledColliderMetadata
+-> build_adaptive_prediction_candidates()
+-> SpherePlaneAdaptiveCandidate / SphereSphereAdaptiveCandidate
+-> AdaptiveMuJoCoRunner
+```
+
+这里的 candidate 不是 MuJoCo contact pair，也不是新的碰撞检测系统。MuJoCo runtime contact detection 仍由 loaded model 中的 geom、`contype` 和 `conaffinity` 完成；candidate 只在碰撞发生前提供解析预测，帮助 adaptive runner 选择更小 substep。builder 不创建或删除 `<contact><pair>`，不改变 collision mask，不改变 `solref/solimp`，不改变 `backend.step()`。当前自动支持 sphere-sphere 和 dynamic sphere 对 static box top 的 sphere-plane approximation；box-box、capsule、cylinder、mesh 等 unsupported geometry 只影响 adaptive prediction coverage，不影响正常 MuJoCo 仿真和 contact detection。
+
 ## Evaluation Layer
 
 Phase 2D2 增加了轻量轨迹采样和 resting-contact 指标：
@@ -287,7 +300,7 @@ Sphere / plane or sphere / sphere state
 
 该估计描述的是 MuJoCo soft-constraint 的数值时间尺度，而不是 Hertz、杨氏模量或材料弹性模型。第一版使用 `assumed_impedance = max(solimp[0], solimp[1])` 作为最快约束动力学的保守估计，并只支持恒速度 sphere-plane 与 sphere-sphere 解析预测。Phase 2G2 本身不自动执行 substeps，不调用 `MuJoCoSubstepRunner`，不修改 timestep，也不修改 `solref/solimp`。
 
-Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。Phase 2G5 进一步检查 fixed-fine reference 是否 timestep 收敛，并对 adaptive 未改善 case 生成结构化 failure attribution。Phase 2G6 将运行级结果拆成独立 contact episodes，并优先比较匹配后的 primary impact。Phase 2G7 进一步把 primary-impact 结论设为默认归因口径，run-level 归因只作为长轨迹解释或 primary 缺失 / unmatched 时的 fallback。Phase 2G8 把这些能力整合为统一 batch pipeline，输出 cases、primary results、reference convergence、group summary、accuracy-cost 和 Markdown report。Phase 2G9 解释 unresolved reference 的指标级原因，并只对 unresolved case 可选追加 h/8 诊断。adaptive 的目标是接近收敛参考的首次接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍属于显式候选驱动方案，不支持任意 geometry 预测、Hertz contact-time、rollback、自动候选生成、自动调参或 robot/task policy。
+Phase 2G3 在 Runtime Layer 中新增 `AdaptiveMuJoCoRunner` 后，Evaluation 可以对比 coarse、fixed fine 和 adaptive 三种推进方式。Phase 2G4 将这种对比固化为可导出的 benchmark 数据集：每个 case 运行三种模式，保存 validity、恢复系数误差、穿透误差、rebound velocity 误差、step ratio、saving 和 adaptive 状态统计。Phase 2G5 进一步检查 fixed-fine reference 是否 timestep 收敛，并对 adaptive 未改善 case 生成结构化 failure attribution。Phase 2G6 将运行级结果拆成独立 contact episodes，并优先比较匹配后的 primary impact。Phase 2G7 进一步把 primary-impact 结论设为默认归因口径，run-level 归因只作为长轨迹解释或 primary 缺失 / unmatched 时的 fallback。Phase 2G8 把这些能力整合为统一 batch pipeline，输出 cases、primary results、reference convergence、group summary、accuracy-cost 和 Markdown report。Phase 2G9 解释 unresolved reference 的指标级原因，并只对 unresolved case 可选追加 h/8 诊断。Phase 2H1 从 compiled collider metadata 自动构造 sphere-plane / sphere-sphere adaptive prediction candidates。adaptive 的目标是接近收敛参考的首次接触精度，同时避免在普通运动或稳定支撑阶段持续使用小 timestep。当前仍不支持 box-box analytic prediction、capsule/cylinder/mesh prediction、AABB broad-phase、Hertz contact-time、rollback、自动调参或 robot/task policy。
 
 fixed coarse 下出现 `e > 1` 被视为数值失真诊断，不视为材料具有额外能量。近似法向能量比 `eta_E = e^2` 只用于 sphere-plane 法向碰撞诊断，不声称代表任意三维碰撞的完整能量守恒分析。
 

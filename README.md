@@ -99,6 +99,7 @@ physical_simulation/
 - Phase 2G7：Primary-Impact Failure Attribution Integration。
 - Phase 2G8：Unified Batch Primary-Impact Evaluation Pipeline。
 - Phase 2G9：Reference Convergence Diagnostics。
+- Phase 2H1：Automatic Adaptive Prediction Candidate Construction。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -327,6 +328,31 @@ Phase 2G8 只是 orchestration、aggregation 和 reporting，不自动修改 ada
 - `examples/22_mujoco_reference_convergence_diagnostics.py`：基于 smoke batch 导出 `artifacts/reference_diagnostics/metric_levels.csv`、`unresolved_cases.csv`、`diagnostics.json` 和 `report.md`。
 
 Phase 2G9 只做诊断，不修改 `AdaptiveMuJoCoRunner`、substep policy、prediction horizon、`solref/solimp`、episode segmentation、reference tolerance 或 contact solver。未检查 reference 与未收敛 reference 继续分开统计。
+
+## Phase 2H1 当前能力
+
+已支持从已加载 MuJoCo scene 自动构造 adaptive pre-contact prediction candidates：
+
+- `build_adaptive_prediction_candidates(scene=..., backend=...)`：从 `PhysicsSceneSpec`、compiled collider metadata 和 loaded backend 构造候选。
+- `CompiledColliderMetadata`：记录 source collider id、runtime body id、MuJoCo geom name、geometry、world transform、dynamic/static 状态、collision group/mask 和 MuJoCo contact params。
+- 自动支持 `SphereSphereAdaptiveCandidate`：两个 eligible sphere collider 生成一个稳定、去重、canonical ordered candidate。
+- 自动支持 `SpherePlaneAdaptiveCandidate`：dynamic sphere + static box collider，在 box top 近似水平、尺寸足够大、sphere 初始投影位于顶面区域时，将 box 顶面近似为 `AnalyticPlane`。
+- pair eligibility：不同 runtime body、至少一个 dynamic body、collision mask 允许、非 visual-only geom、当前 geometry 支持。
+- unsupported geometry：box-box、capsule-box、mesh 等不会阻塞 MuJoCo 仿真，只会记录 diagnostic，当前不生成 adaptive prediction candidate。
+- `create_adaptive_runner_from_scene()` 和 `AdaptiveMuJoCoRunner.from_scene()`：提供自动候选 + 手工候选的便捷构造；手工候选 API 继续可用。
+- `examples/23_mujoco_automatic_adaptive_candidates.py`：展示 sphere-plane 和 sphere-sphere 自动候选，并直接运行 adaptive simulation。
+
+必须区分两件事：
+
+```text
+MuJoCo runtime contact detection
+-> 仍由 MuJoCo 根据 geom / contype / conaffinity 自动完成
+
+Adaptive pre-contact prediction candidates
+-> 只为 adaptive timestep 在碰撞前预测何时该加密 substeps
+```
+
+candidate builder 不创建或删除 MuJoCo contact pair，不修改 `contype/conaffinity`，不修改 `solref/solimp`，也不改变 `backend.step()` 或 adaptive timestep policy。
 
 ## 控制与外力接口
 

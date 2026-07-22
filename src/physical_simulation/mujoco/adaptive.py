@@ -191,6 +191,28 @@ class AdaptiveStepResult:
 class AdaptiveMuJoCoRunner:
     """Adaptive macro-step runner for explicitly registered simple collision candidates."""
 
+    @classmethod
+    def from_scene(
+        cls,
+        backend: MuJoCoBackend,
+        *,
+        scene,
+        runner_config: AdaptiveSubstepConfig,
+        candidate_build_config=None,
+        manual_candidates: Sequence[AdaptiveCollisionCandidate] = (),
+    ) -> "AdaptiveMuJoCoRunner":
+        """Create a runner from automatic scene candidates plus optional manual candidates."""
+        from physical_simulation.mujoco.adaptive_candidates import create_adaptive_runner_from_scene
+
+        runner, _result = create_adaptive_runner_from_scene(
+            backend,
+            scene=scene,
+            runner_config=runner_config,
+            candidate_build_config=candidate_build_config,
+            manual_candidates=manual_candidates,
+        )
+        return runner
+
     def __init__(
         self,
         backend: MuJoCoBackend,
