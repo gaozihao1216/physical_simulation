@@ -16,8 +16,10 @@ from physical_simulation.assets import (
     create_sphere,
 )
 from physical_simulation.backends import MuJoCoBackend
+from physical_simulation.mujoco.adaptive import _point_in_bounds
 from physical_simulation.mujoco import (
     AdaptiveCandidateBuildConfig,
+    ConservativePrimitiveAdaptiveCandidate,
     MuJoCoContactSolverParams,
     SpherePlaneAdaptiveCandidate,
     SphereSphereAdaptiveCandidate,
@@ -37,6 +39,9 @@ def test_builds_sphere_plane_candidate_for_dynamic_sphere_and_static_large_box()
     assert candidate.sphere_runtime_body_id == "sphere_01/sphere"
     assert candidate.sphere_radius == 0.1
     assert candidate.plane.normal == pytest.approx((0.0, 0.0, 1.0))
+    assert candidate.finite_bounds is not None
+    assert _point_in_bounds((0.0, 0.0, 0.0), candidate.finite_bounds)
+    assert not _point_in_bounds((2.0, 0.0, 0.0), candidate.finite_bounds)
 
 
 def test_builds_sphere_sphere_candidate_with_stable_order_and_contact_params() -> None:
@@ -104,11 +109,14 @@ def test_visual_only_geom_is_not_inspected() -> None:
 def test_tilted_or_too_small_box_top_is_skipped() -> None:
     tilted = _sphere_ground_scene(ground_transform=Transform(rotation=(math.cos(0.2), math.sin(0.2), 0.0, 0.0), position=(0, 0, -0.05)))
     small = _sphere_ground_scene(ground_size=(0.2, 0.2, 0.1))
-    assert _build(tilted).skipped_invalid_plane_count == 1
-    assert _build(small).skipped_invalid_plane_count == 1
+    config = AdaptiveCandidateBuildConfig(include_conservative_primitives=False)
+    assert _build(tilted, config=config).skipped_invalid_plane_count == 1
+    assert _build(small, config=config).skipped_invalid_plane_count == 1
+    assert isinstance(_build(tilted).candidates[0], ConservativePrimitiveAdaptiveCandidate)
+    assert isinstance(_build(small).candidates[0], ConservativePrimitiveAdaptiveCandidate)
 
 
-def test_unsupported_geometry_is_diagnostic_only() -> None:
+def test_unsupported_geometry_uses_conservative_fallback() -> None:
     capsule = create_single_body_asset(asset_id="capsule_asset", body=create_capsule("capsule", 0.05, 0.2, mass=1.0, create_visual=False))
     box = create_single_body_asset(asset_id="box_asset", body=create_box("box", (1, 1, 0.1), body_type="static", create_visual=False))
     scene = create_scene(
@@ -117,9 +125,54 @@ def test_unsupported_geometry_is_diagnostic_only() -> None:
         timestep=1.0 / 240.0,
     )
     result = _build(scene)
-    assert result.generated_candidate_count == 0
-    assert result.skipped_unsupported_geometry_count == 1
-    assert result.diagnostics[0].status.value == "unsupported"
+    assert result.generated_candidate_count == 1
+    assert result.skipped_unsupported_geometry_count == 0
+    assert isinstance(result.candidates[0], ConservativePrimitiveAdaptiveCandidate)
+
+
+def test_box_box_uses_conservative_candidate() -> None:
+    scene = _box_box_scene()
+    result = _build(scene)
+    assert result.generated_candidate_count == 1
+    candidate = result.candidates[0]
+    assert isinstance(candidate, ConservativePrimitiveAdaptiveCandidate)
+    assert candidate.bounding_radius_a > 0.0
+    assert candidate.bounding_radius_b > 0.0
+
+
+def test_compound_body_pairs_are_aggregated_by_runtime_body_pair() -> None:
+    first = create_box("body_a", (0.2, 0.2, 0.2), mass=1.0, create_visual=False)
+    second = create_box("body_b", (0.2, 0.2, 0.2), mass=1.0, create_visual=False)
+    first = replace(
+        first,
+        colliders=(
+            first.colliders[0],
+            replace(first.colliders[0], collider_id="body_a_offset", local_transform=Transform(position=(0.3, 0.0, 0.0))),
+        ),
+    )
+    second = replace(
+        second,
+        colliders=(
+            second.colliders[0],
+            replace(second.colliders[0], collider_id="body_b_offset", local_transform=Transform(position=(-0.3, 0.0, 0.0))),
+        ),
+    )
+    scene = create_scene(
+        scene_id="compound_box_pair",
+        instances=(
+            AssetInstanceSpec("a_01", create_single_body_asset(asset_id="a_asset", body=first), Transform(position=(-0.6, 0, 0))),
+            AssetInstanceSpec("b_01", create_single_body_asset(asset_id="b_asset", body=second), Transform(position=(0.6, 0, 0))),
+        ),
+        gravity=(0, 0, 0),
+        timestep=1.0 / 240.0,
+    )
+    result = _build(scene)
+    assert result.generated_candidate_count == 1
+    assert result.eligible_pair_count == 4
+    candidate = result.candidates[0]
+    assert isinstance(candidate, ConservativePrimitiveAdaptiveCandidate)
+    assert candidate.bounding_radius_a > 0.3
+    assert candidate.bounding_radius_b > 0.3
 
 
 def _build(scene, config=None):
@@ -165,5 +218,18 @@ def _sphere_sphere_scene(*, params):
             AssetInstanceSpec("b_01", create_single_body_asset(asset_id="b_asset", body=second), Transform(position=(0.5, 0, 0))),
         ),
         gravity=(0, 0, 0),
+        timestep=1.0 / 240.0,
+    )
+
+
+def _box_box_scene():
+    first = create_box("box_a", (0.2, 0.2, 0.2), mass=1.0, create_visual=False)
+    second = create_box("box_b", (0.2, 0.2, 0.2), body_type="static", create_visual=False)
+    return create_scene(
+        scene_id="box_box",
+        instances=(
+            AssetInstanceSpec("a_01", create_single_body_asset(asset_id="a_asset", body=first), Transform(position=(0.0, 0.0, 0.8))),
+            AssetInstanceSpec("b_01", create_single_body_asset(asset_id="b_asset", body=second), Transform(position=(0.0, 0.0, 0.0)), fixed_base=True),
+        ),
         timestep=1.0 / 240.0,
     )

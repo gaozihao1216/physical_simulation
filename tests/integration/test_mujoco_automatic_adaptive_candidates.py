@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from physical_simulation.assets import Transform, create_box, create_single_body_asset
+from dataclasses import replace
+
+from physical_simulation.assets import Transform, create_box, create_capsule, create_single_body_asset
 from physical_simulation.backends import MuJoCoBackend
 from physical_simulation.evaluation.contact_benchmark import (
     BenchmarkMode,
@@ -18,6 +20,7 @@ from physical_simulation.evaluation.contact_benchmark import (
 from physical_simulation.mujoco import (
     AdaptiveMuJoCoRunner,
     AdaptiveSubstepConfig,
+    ConservativePrimitiveAdaptiveCandidate,
     ContactMotionState,
     build_adaptive_prediction_candidates,
 )
@@ -58,14 +61,14 @@ def test_auto_sphere_sphere_candidate_improves_over_fixed_coarse() -> None:
     assert comparison.adaptive_improves_penetration
 
 
-def test_unsupported_box_box_scene_keeps_mujoco_contact_detection() -> None:
+def test_box_box_scene_uses_conservative_candidate_and_keeps_mujoco_contact_detection() -> None:
     scene = _box_drop_scene()
     backend = MuJoCoBackend()
     try:
         backend.load_scene(scene)
         candidates = build_adaptive_prediction_candidates(scene=scene, backend=backend)
-        assert candidates.generated_candidate_count == 0
-        assert candidates.skipped_unsupported_geometry_count == 1
+        assert candidates.generated_candidate_count == 1
+        assert isinstance(candidates.candidates[0], ConservativePrimitiveAdaptiveCandidate)
         backend.reset()
         observed_contact = False
         for _ in range(180):
@@ -74,6 +77,18 @@ def test_unsupported_box_box_scene_keeps_mujoco_contact_detection() -> None:
         assert observed_contact
     finally:
         backend.close()
+
+
+def test_capsule_box_and_compound_scenes_get_conservative_candidates() -> None:
+    for scene in (_capsule_box_scene(), _compound_scene()):
+        backend = MuJoCoBackend()
+        try:
+            backend.load_scene(scene)
+            build = build_adaptive_prediction_candidates(scene=scene, backend=backend)
+            assert build.generated_candidate_count == 1
+            assert isinstance(build.candidates[0], ConservativePrimitiveAdaptiveCandidate)
+        finally:
+            backend.close()
 
 
 def _run_auto_adaptive_case(case):
@@ -111,3 +126,35 @@ def _box_drop_scene():
         timestep=1.0 / 240.0,
     )
 
+
+def _capsule_box_scene():
+    ground = create_box("ground", (2.0, 2.0, 0.1), body_type="static", transform=Transform(position=(0, 0, -0.05)), create_visual=False)
+    capsule = create_capsule("capsule", 0.05, 0.2, mass=1.0, create_visual=False)
+    return create_scene(
+        scene_id="capsule_box_conservative",
+        instances=(
+            AssetInstanceSpec("ground_01", create_single_body_asset(asset_id="ground_asset", body=ground), fixed_base=True),
+            AssetInstanceSpec("capsule_01", create_single_body_asset(asset_id="capsule_asset", body=capsule), Transform(position=(0, 0, 0.8))),
+        ),
+        timestep=1.0 / 240.0,
+    )
+
+
+def _compound_scene():
+    ground = create_box("ground", (2.0, 2.0, 0.1), body_type="static", transform=Transform(position=(0, 0, -0.05)), create_visual=False)
+    body = create_box("compound", (0.2, 0.2, 0.2), mass=1.0, create_visual=False)
+    body = replace(
+        body,
+        colliders=(
+            body.colliders[0],
+            replace(body.colliders[0], collider_id="compound_offset", local_transform=Transform(position=(0.25, 0, 0))),
+        ),
+    )
+    return create_scene(
+        scene_id="compound_conservative",
+        instances=(
+            AssetInstanceSpec("ground_01", create_single_body_asset(asset_id="ground_asset", body=ground), fixed_base=True),
+            AssetInstanceSpec("compound_01", create_single_body_asset(asset_id="compound_asset", body=body), Transform(position=(0, 0, 0.8))),
+        ),
+        timestep=1.0 / 240.0,
+    )

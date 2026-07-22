@@ -6,7 +6,7 @@
 
 本项目负责 AIGC 流程中的物理仿真部分：在视觉几何重建完成之后，补充物理语义，构建后端无关的 Physics IR，并逐步接入碰撞体生成、刚体动力学、关节系统、机器人任务和动态评估。
 
-当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估、显式候选驱动的自适应 MuJoCo 子步进 runner、coarse/fine/adaptive 接触 benchmark 与失真诊断，以及 fixed-fine reference convergence 和 adaptive failure attribution。关节、机器人和完整任务框架仍未实现。
+当前已经支持参数化 Physics IR、场景表示、MJCF 编译、MuJoCo 模型加载、reset、单步 step、刚体世界状态读取、MuJoCo active contact 到 `ContactPoint` 的映射、单点 `ContactWrench` 读取、按 body/body-pair 的 contact wrench 聚合、离散 contact impulse 积分、MuJoCo 接触 solver 参数配置、基础 drop/resting-contact/restitution 标定评估、自适应 MuJoCo 子步进 runner、自动 adaptive prediction candidate 构建、coarse/fine/adaptive 接触 benchmark 与失真诊断，以及 fixed-fine reference convergence 和 adaptive failure attribution。关节、机器人和完整任务框架仍未实现。
 
 ## 与 3D Reconstruction 模块的边界
 
@@ -100,6 +100,7 @@ physical_simulation/
 - Phase 2G8：Unified Batch Primary-Impact Evaluation Pipeline。
 - Phase 2G9：Reference Convergence Diagnostics。
 - Phase 2H1：Automatic Adaptive Prediction Candidate Construction。
+- Phase 2H2：Conservative Primitive Collision Prediction。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -329,18 +330,22 @@ Phase 2G8 只是 orchestration、aggregation 和 reporting，不自动修改 ada
 
 Phase 2G9 只做诊断，不修改 `AdaptiveMuJoCoRunner`、substep policy、prediction horizon、`solref/solimp`、episode segmentation、reference tolerance 或 contact solver。未检查 reference 与未收敛 reference 继续分开统计。
 
-## Phase 2H1 当前能力
+## Phase 2H1 / 2H2 当前能力
 
 已支持从已加载 MuJoCo scene 自动构造 adaptive pre-contact prediction candidates：
 
 - `build_adaptive_prediction_candidates(scene=..., backend=...)`：从 `PhysicsSceneSpec`、compiled collider metadata 和 loaded backend 构造候选。
-- `CompiledColliderMetadata`：记录 source collider id、runtime body id、MuJoCo geom name、geometry、world transform、dynamic/static 状态、collision group/mask 和 MuJoCo contact params。
+- `CompiledColliderMetadata`：记录 source collider id、runtime body id、MuJoCo geom name、geometry、body world transform、collider world transform、dynamic/static 状态、collision group/mask 和 MuJoCo contact params。
 - 自动支持 `SphereSphereAdaptiveCandidate`：两个 eligible sphere collider 生成一个稳定、去重、canonical ordered candidate。
-- 自动支持 `SpherePlaneAdaptiveCandidate`：dynamic sphere + static box collider，在 box top 近似水平、尺寸足够大、sphere 初始投影位于顶面区域时，将 box 顶面近似为 `AnalyticPlane`。
+- 自动支持 `SpherePlaneAdaptiveCandidate`：dynamic sphere + static box collider，在 box top 近似水平、尺寸足够大、sphere 初始投影位于顶面区域时，将 box 顶面近似为 `AnalyticPlane`，并附带有限矩形顶面 bounds；预测接触点落到 bounds 外时不会触发。
+- 解析预测优先：sphere-sphere 和 sphere-plane 解析候选优先使用；无法生成解析候选时，才回退到保守 primitive 包围球候选。
+- `ConservativePrimitiveAdaptiveCandidate`：基于 collider 的 world-space bounding sphere 和 collider 相对 runtime body 的偏移，聚合为 runtime body pair 的保守预测候选；当前覆盖 box、sphere、capsule、cylinder、cone、frustum、ellipsoid、spherical cap、regular prism 和 wedge/ramp 等参数化 primitive。mesh collision proxy 若能以已有 `GeometrySpec` 表达，则参与包围球估计；真正 contact detection 仍由 MuJoCo 完成。
+- 保守速度估计：沿两 body 中心连线的相对闭合线速度，加上 `|angular_velocity_a| * bounding_radius_a + |angular_velocity_b| * bounding_radius_b` 的旋转扫掠上界。该预测允许少量提前细分，但目标是不漏掉明显高速碰撞。
 - pair eligibility：不同 runtime body、至少一个 dynamic body、collision mask 允许、非 visual-only geom、当前 geometry 支持。
-- unsupported geometry：box-box、capsule-box、mesh 等不会阻塞 MuJoCo 仿真，只会记录 diagnostic，当前不生成 adaptive prediction candidate。
+- runtime body pair 聚合：同一对 runtime bodies 的多个 collider pair 只生成一个保守 candidate，bounding radius 取覆盖所有相关 collider 的最大值，contact params 选要求更小 solver timescale 的组合。
+- 排除项：同一 runtime body、static-static、collision mask 不允许、visual-only collider 都不会生成 prediction candidate。
 - `create_adaptive_runner_from_scene()` 和 `AdaptiveMuJoCoRunner.from_scene()`：提供自动候选 + 手工候选的便捷构造；手工候选 API 继续可用。
-- `examples/23_mujoco_automatic_adaptive_candidates.py`：展示 sphere-plane 和 sphere-sphere 自动候选，并直接运行 adaptive simulation。
+- `examples/23_mujoco_automatic_adaptive_candidates.py`：展示 sphere-plane、sphere-sphere、box-box、capsule-box 和 compound body 自动候选，并直接运行 adaptive simulation。
 
 必须区分两件事：
 
@@ -352,7 +357,7 @@ Adaptive pre-contact prediction candidates
 -> 只为 adaptive timestep 在碰撞前预测何时该加密 substeps
 ```
 
-candidate builder 不创建或删除 MuJoCo contact pair，不修改 `contype/conaffinity`，不修改 `solref/solimp`，也不改变 `backend.step()` 或 adaptive timestep policy。
+candidate builder 不创建或删除 MuJoCo contact pair，不修改 `contype/conaffinity`，不修改 `solref/solimp`，也不改变 `backend.step()` 或 adaptive timestep policy。conservative candidate 只是提前请求更细 substep，不能替代 MuJoCo contact detection。
 
 ## 控制与外力接口
 
@@ -387,10 +392,9 @@ MuJoCo backend 已支持自由动态刚体的基础控制/扰动接口：
 - parameter optimization
 - material parameter inversion
 - initial velocity API
-- general geometry collision prediction
+- exact general geometry collision prediction
 - Hertz contact-time estimation
 - event-time rollback
-- automatic adaptive candidate generation
 - automatic adaptive tuning
 - automatic material-to-solver mapping
 - quantitative friction validation

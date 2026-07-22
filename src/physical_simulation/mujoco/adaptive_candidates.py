@@ -9,7 +9,19 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Sequence
 
-from physical_simulation.assets import BoxGeometry, GeometrySpec, SphereGeometry
+from physical_simulation.assets import (
+    BoxGeometry,
+    CapsuleGeometry,
+    ConeGeometry,
+    CylinderGeometry,
+    EllipsoidGeometry,
+    FrustumGeometry,
+    GeometrySpec,
+    RegularPrismGeometry,
+    SphereGeometry,
+    SphericalCapGeometry,
+    WedgeGeometry,
+)
 from physical_simulation.backends.mujoco_backend import MuJoCoBackend
 from physical_simulation.compilers.mujoco_compiler import collision_pair_enabled
 from physical_simulation.compilers.mujoco_types import CompiledColliderMetadata
@@ -17,11 +29,14 @@ from physical_simulation.mujoco.adaptive import (
     AdaptiveCollisionCandidate,
     AdaptiveMuJoCoRunner,
     AdaptiveSubstepConfig,
+    ConservativePrimitiveAdaptiveCandidate,
+    FinitePlaneBounds,
     SpherePlaneAdaptiveCandidate,
     SphereSphereAdaptiveCandidate,
 )
 from physical_simulation.mujoco.collision_prediction import AnalyticPlane
 from physical_simulation.mujoco.contact_params import MuJoCoContactSolverParams, resolve_mujoco_contact_solver_params
+from physical_simulation.mujoco.contact_timescale import estimate_solver_contact_timescale
 from physical_simulation.scene import PhysicsSceneSpec
 from physical_simulation.validation.asset_validator import _finite_float
 from physical_simulation.validation.errors import PhysicsValidationError
@@ -30,11 +45,24 @@ Vector3 = tuple[float, float, float]
 
 
 @dataclass(frozen=True)
+class _ConservativeBodyPair:
+    body_a_id: str
+    body_b_id: str
+    radius_a: float
+    radius_b: float
+    contact_params: MuJoCoContactSolverParams
+    timescale_score: float
+    source_a: CompiledColliderMetadata
+    source_b: CompiledColliderMetadata
+
+
+@dataclass(frozen=True)
 class AdaptiveCandidateBuildConfig:
     """Configuration for automatic adaptive candidate construction."""
 
     include_sphere_plane: bool = True
     include_sphere_sphere: bool = True
+    include_conservative_primitives: bool = True
     require_at_least_one_dynamic_body: bool = True
     exclude_same_runtime_body: bool = True
     respect_collision_masks: bool = True
@@ -130,6 +158,8 @@ def build_adaptive_prediction_candidates(
     skipped_invalid_plane = 0
     eligible = 0
     seen_pairs: set[tuple[str, str]] = set()
+    conservative_pairs: dict[tuple[str, str], "_ConservativeBodyPair"] = {}
+    analytic_body_pairs: set[tuple[str, str]] = set()
 
     for index, first in enumerate(colliders):
         for second in colliders[index + 1:]:
@@ -158,6 +188,19 @@ def build_adaptive_prediction_candidates(
             eligible += 1
             candidate, reason = _build_pair_candidate(first, second, cfg)
             if candidate is None:
+                fallback = _conservative_pair_entry(first, second, cfg)
+                if fallback is not None and cfg.include_conservative_primitives:
+                    _merge_conservative_pair(conservative_pairs, fallback)
+                    diagnostics.append(
+                        _diagnostic(
+                            first,
+                            second,
+                            AdaptiveCandidateDiagnosticStatus.GENERATED,
+                            f"generated conservative primitive fallback after {reason}",
+                            _conservative_candidate(fallback).candidate_id,
+                        )
+                    )
+                    continue
                 if reason.startswith("invalid plane"):
                     skipped_invalid_plane += 1
                     status = AdaptiveCandidateDiagnosticStatus.SKIPPED
@@ -170,8 +213,15 @@ def build_adaptive_prediction_candidates(
                         )
                 diagnostics.append(_diagnostic(first, second, status, reason, None))
                 continue
+            analytic_body_pairs.add(_body_pair_key(first.runtime_body_id, second.runtime_body_id))
             candidates.setdefault(candidate.candidate_id, candidate)
             diagnostics.append(_diagnostic(first, second, AdaptiveCandidateDiagnosticStatus.GENERATED, reason, candidate.candidate_id))
+
+    for key, pair in conservative_pairs.items():
+        if key in analytic_body_pairs:
+            continue
+        candidate = _conservative_candidate(pair)
+        candidates.setdefault(candidate.candidate_id, candidate)
 
     ordered = tuple(sorted(candidates.values(), key=lambda item: (_candidate_type_name(item), item.candidate_id)))
     return AdaptiveCandidateBuildResult(
@@ -254,12 +304,14 @@ def _sphere_plane_candidate(
     valid, _reason, plane = _box_top_plane(box, sphere, config)
     if not valid or plane is None:
         return None
+    bounds = _box_top_bounds(box)
     return SpherePlaneAdaptiveCandidate(
         candidate_id=_candidate_id("sphere_plane", sphere, box),
         sphere_runtime_body_id=sphere.runtime_body_id,
         sphere_radius=sphere.geometry.radius,  # type: ignore[union-attr]
         plane=plane,
         contact_params=resolve_mujoco_contact_solver_params(sphere.contact_params, box.contact_params),
+        finite_bounds=bounds,
     )
 
 
@@ -323,6 +375,115 @@ def _box_top_plane(
     return True, "ok", AnalyticPlane(point=top_center, normal=normal, linear_velocity=(0.0, 0.0, 0.0))
 
 
+def _box_top_bounds(box: CompiledColliderMetadata) -> FinitePlaneBounds:
+    geometry = box.geometry
+    if not isinstance(geometry, BoxGeometry):
+        raise PhysicsValidationError(f"box must be BoxGeometry; actual value={geometry!r}")
+    sx, sy, sz = geometry.size
+    normal = _normalize(box.world_transform.rotate_vector((0.0, 0.0, 1.0)))
+    return FinitePlaneBounds(
+        center=_add(box.world_transform.position, _scale(normal, sz / 2.0)),
+        axis_u=_normalize(box.world_transform.rotate_vector((1.0, 0.0, 0.0))),
+        axis_v=_normalize(box.world_transform.rotate_vector((0.0, 1.0, 0.0))),
+        half_extent_u=sx / 2.0,
+        half_extent_v=sy / 2.0,
+    )
+
+
+def _conservative_pair_entry(
+    first: CompiledColliderMetadata,
+    second: CompiledColliderMetadata,
+    config: AdaptiveCandidateBuildConfig,
+) -> _ConservativeBodyPair | None:
+    if not config.include_conservative_primitives:
+        return None
+    ordered_first, ordered_second = _canonical_metadata_pair(first, second)
+    radius_first = _body_bounding_radius_for_collider(ordered_first)
+    radius_second = _body_bounding_radius_for_collider(ordered_second)
+    if radius_first is None or radius_second is None:
+        return None
+    params = resolve_mujoco_contact_solver_params(ordered_first.contact_params, ordered_second.contact_params)
+    timescale = estimate_solver_contact_timescale(params).characteristic_timescale
+    return _ConservativeBodyPair(
+        body_a_id=ordered_first.runtime_body_id,
+        body_b_id=ordered_second.runtime_body_id,
+        radius_a=radius_first,
+        radius_b=radius_second,
+        contact_params=params,
+        timescale_score=timescale,
+        source_a=ordered_first,
+        source_b=ordered_second,
+    )
+
+
+def _merge_conservative_pair(
+    pairs: dict[tuple[str, str], _ConservativeBodyPair],
+    candidate: _ConservativeBodyPair,
+) -> None:
+    key = _body_pair_key(candidate.body_a_id, candidate.body_b_id)
+    existing = pairs.get(key)
+    if existing is None:
+        pairs[key] = candidate
+        return
+    selected_params = candidate.contact_params if candidate.timescale_score < existing.timescale_score else existing.contact_params
+    selected_score = min(candidate.timescale_score, existing.timescale_score)
+    pairs[key] = _ConservativeBodyPair(
+        body_a_id=existing.body_a_id,
+        body_b_id=existing.body_b_id,
+        radius_a=max(existing.radius_a, candidate.radius_a),
+        radius_b=max(existing.radius_b, candidate.radius_b),
+        contact_params=selected_params,
+        timescale_score=selected_score,
+        source_a=existing.source_a,
+        source_b=existing.source_b,
+    )
+
+
+def _conservative_candidate(pair: _ConservativeBodyPair) -> ConservativePrimitiveAdaptiveCandidate:
+    return ConservativePrimitiveAdaptiveCandidate(
+        candidate_id=_candidate_id("conservative_primitive", pair.source_a, pair.source_b),
+        body_a_id=pair.body_a_id,
+        bounding_radius_a=pair.radius_a,
+        body_b_id=pair.body_b_id,
+        bounding_radius_b=pair.radius_b,
+        contact_params=pair.contact_params,
+    )
+
+
+def _body_bounding_radius_for_collider(item: CompiledColliderMetadata) -> float | None:
+    geometry_radius = _geometry_bounding_radius(item.geometry)
+    if geometry_radius is None:
+        return None
+    offset = _norm(_subtract(item.world_transform.position, item.body_world_transform.position))
+    return offset + geometry_radius
+
+
+def _geometry_bounding_radius(geometry: GeometrySpec) -> float | None:
+    if isinstance(geometry, SphereGeometry):
+        return geometry.radius
+    if isinstance(geometry, BoxGeometry):
+        x, y, z = geometry.size
+        return math.sqrt((x / 2.0) ** 2 + (y / 2.0) ** 2 + (z / 2.0) ** 2)
+    if isinstance(geometry, CapsuleGeometry):
+        return geometry.length / 2.0 + geometry.radius
+    if isinstance(geometry, CylinderGeometry):
+        return math.sqrt(geometry.radius**2 + (geometry.height / 2.0) ** 2)
+    if isinstance(geometry, ConeGeometry):
+        return math.sqrt(geometry.radius**2 + (geometry.height / 2.0) ** 2)
+    if isinstance(geometry, FrustumGeometry):
+        return math.sqrt(max(geometry.bottom_radius, geometry.top_radius) ** 2 + (geometry.height / 2.0) ** 2)
+    if isinstance(geometry, EllipsoidGeometry):
+        return max(geometry.radii)
+    if isinstance(geometry, SphericalCapGeometry):
+        return geometry.radius
+    if isinstance(geometry, RegularPrismGeometry):
+        return math.sqrt(geometry.radius**2 + (geometry.height / 2.0) ** 2)
+    if isinstance(geometry, WedgeGeometry):
+        x, y, z = geometry.size
+        return math.sqrt((x / 2.0) ** 2 + (y / 2.0) ** 2 + (z / 2.0) ** 2)
+    return None
+
+
 def _metadata_sort_key(item: CompiledColliderMetadata) -> tuple[str, str, str]:
     return (item.runtime_body_id, item.collider_id, item.mujoco_geom_name)
 
@@ -331,6 +492,10 @@ def _canonical_pair_key(first: CompiledColliderMetadata, second: CompiledCollide
     a = f"{first.runtime_body_id}/{first.collider_id}/{first.mujoco_geom_name}"
     b = f"{second.runtime_body_id}/{second.collider_id}/{second.mujoco_geom_name}"
     return (a, b) if a <= b else (b, a)
+
+
+def _body_pair_key(first_body: str, second_body: str) -> tuple[str, str]:
+    return (first_body, second_body) if first_body <= second_body else (second_body, first_body)
 
 
 def _canonical_metadata_pair(
@@ -355,6 +520,8 @@ def _candidate_type_name(candidate: AdaptiveCollisionCandidate) -> str:
         return "sphere_plane"
     if isinstance(candidate, SphereSphereAdaptiveCandidate):
         return "sphere_sphere"
+    if isinstance(candidate, ConservativePrimitiveAdaptiveCandidate):
+        return "conservative_primitive"
     return type(candidate).__name__
 
 
@@ -404,4 +571,3 @@ def _normalize(vector: Vector3) -> Vector3:
     if length <= 1.0e-12:
         return (0.0, 0.0, 1.0)
     return _scale(vector, 1.0 / length)
-

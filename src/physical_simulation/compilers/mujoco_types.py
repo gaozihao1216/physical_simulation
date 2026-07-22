@@ -16,6 +16,7 @@ class CompiledColliderMetadata:
     runtime_body_id: str
     mujoco_geom_name: str
     geometry: GeometrySpec
+    body_world_transform: Transform
     world_transform: Transform
     is_dynamic: bool
     collision_group: int

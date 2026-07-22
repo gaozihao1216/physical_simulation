@@ -33,9 +33,11 @@ __all__ = [
     "AdaptiveStepResult",
     "AdaptiveSubstepConfig",
     "ContactMotionState",
+    "ConservativePrimitiveAdaptiveCandidate",
     "CollisionPrediction",
     "DampingRegime",
     "DEFAULT_MUJOCO_CONTACT_SOLVER_PARAMS",
+    "FinitePlaneBounds",
     "MuJoCoContactSolverParams",
     "MuJoCoSubstepRunner",
     "SolverCollisionEstimate",
@@ -97,6 +99,8 @@ def __getattr__(name: str):
         "AdaptiveStepResult",
         "AdaptiveSubstepConfig",
         "ContactMotionState",
+        "ConservativePrimitiveAdaptiveCandidate",
+        "FinitePlaneBounds",
         "SpherePlaneAdaptiveCandidate",
         "SphereSphereAdaptiveCandidate",
     }:
@@ -106,6 +110,8 @@ def __getattr__(name: str):
             AdaptiveStepResult,
             AdaptiveSubstepConfig,
             ContactMotionState,
+            ConservativePrimitiveAdaptiveCandidate,
+            FinitePlaneBounds,
             SpherePlaneAdaptiveCandidate,
             SphereSphereAdaptiveCandidate,
         )
@@ -116,6 +122,8 @@ def __getattr__(name: str):
             "AdaptiveStepResult": AdaptiveStepResult,
             "AdaptiveSubstepConfig": AdaptiveSubstepConfig,
             "ContactMotionState": ContactMotionState,
+            "ConservativePrimitiveAdaptiveCandidate": ConservativePrimitiveAdaptiveCandidate,
+            "FinitePlaneBounds": FinitePlaneBounds,
             "SpherePlaneAdaptiveCandidate": SpherePlaneAdaptiveCandidate,
             "SphereSphereAdaptiveCandidate": SphereSphereAdaptiveCandidate,
         }
