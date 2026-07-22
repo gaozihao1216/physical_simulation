@@ -98,6 +98,7 @@ physical_simulation/
 - Phase 2G6：Episode-Level Contact Metrics and Event Matching。
 - Phase 2G7：Primary-Impact Failure Attribution Integration。
 - Phase 2G8：Unified Batch Primary-Impact Evaluation Pipeline。
+- Phase 2G9：Reference Convergence Diagnostics。
 - Phase 3：MuJoCo Backend。
 - Phase 4：Rigid Body Simulation。
 - Phase 5：Articulation。
@@ -313,6 +314,19 @@ BatchCase
 ```
 
 Phase 2G8 只是 orchestration、aggregation 和 reporting，不自动修改 adaptive 参数，不改变 timestep policy，不修改 `solref/solimp`、`backend.step()` 或 MuJoCo contact solver。fixed-fine 只是 provisional baseline；只有经过 refinement 且 primary episode 收敛的结果才能称为 converged reference。改善率必须报告明确分母，分母只包含 reference checked and converged、primary matched、metric applicable、adaptive valid 的 case。
+
+## Phase 2G9 当前能力
+
+已支持 reference convergence diagnostics，用于解释 checked case 为什么未正式收敛：
+
+- `ReferenceUnresolvedReason`：区分 `EPISODE_UNMATCHED`、`RESTITUTION_NOT_CONVERGED`、`PENETRATION_NOT_CONVERGED`、`DURATION_NOT_CONVERGED`、`START_TIME_NOT_CONVERGED`、`NON_MONOTONIC_REFINEMENT`、`METRIC_SAMPLING_SENSITIVITY`、`INVALID_LEVEL` 等原因。
+- `ReferenceDiagnosticStatus`：报告层明确区分 `NOT_CHECKED`、`CONVERGED`、`NEAR_CONVERGED`、`NOT_CONVERGED` 和 `INVALID`；`NEAR_CONVERGED` 只用于诊断，不算正式 converged。
+- `run_reference_convergence_diagnostics()`：对 selected checked cases 输出 fine、finer、ultra-fine 的 primary-impact level 指标，并为 unresolved case 可选追加 extra-fine / `h/8`。
+- 每个 refinement level 记录 restitution、maximum penetration、contact duration、primary-impact start time、impact speed 和 separation speed。
+- 每个指标记录 `D1 = |Q_fine - Q_finer|`、`D2 = |Q_finer - Q_ultra|`、`rho = D2 / D1`，用于识别非单调 refinement 和采样敏感性。
+- `examples/22_mujoco_reference_convergence_diagnostics.py`：基于 smoke batch 导出 `artifacts/reference_diagnostics/metric_levels.csv`、`unresolved_cases.csv`、`diagnostics.json` 和 `report.md`。
+
+Phase 2G9 只做诊断，不修改 `AdaptiveMuJoCoRunner`、substep policy、prediction horizon、`solref/solimp`、episode segmentation、reference tolerance 或 contact solver。未检查 reference 与未收敛 reference 继续分开统计。
 
 ## 控制与外力接口
 
